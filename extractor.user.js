@@ -125,7 +125,7 @@
         overlay.innerHTML = `
             <div style="width:900px; max-width:95%; max-height:85vh; background:#f8f9fa; border-radius:15px; overflow:hidden; box-shadow:0 10px 40px rgba(0,0,0,0.3); font-family: sans-serif; display:flex; flex-direction:column;">
                 <div style="padding:15px 20px; background:#4287f5; color:white; display:flex; justify-content:space-between; align-items:center;">
-                    <h2 style="margin:0; font-size:1.1rem;">🐾 Mon Album Monopoly Go - @2026 Droopygoon</h2>
+                    <h2 style="margin:0; font-size:1.1rem;">🐾 Mon Album Monopoly Go - @2026 Droopygoon - V${CURRENT_VERSION}</h2>
                     <button id="close-modal" style="background:rgba(255,255,255,0.2); border:none; color:white; padding:5px 12px; border-radius:5px; cursor:pointer;">Fermer</button>
                 </div>
                 <div style="padding:10px 20px; background:#eee; border-bottom:1px solid #ddd; display:flex; align-items:center; gap:10px;">
