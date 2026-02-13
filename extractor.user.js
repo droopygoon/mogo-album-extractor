@@ -3,7 +3,7 @@
 // @namespace   UserScripts
 // @match       https://*.monopolygo.com/*
 // @grant       none
-// @version     1.4
+// @version     1.5
 // @run-at      document-start
 // @author      Droopygoon with Gemini
 // @downloadURL https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
