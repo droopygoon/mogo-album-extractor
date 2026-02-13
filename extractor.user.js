@@ -57,18 +57,30 @@
     XMLHttpRequest.prototype.open = function() {
         this.addEventListener('load', () => {
             if (this.responseURL.includes('sticker-trading')) {
-                try { handleData(JSON.parse(this.responseText)); } catch(e) {}
+                                try {
+                    const json = JSON.parse(this.responseText);
+                    if (json?.Data?.Sets) {
+                        albumData = json.Data;
+                        createFloatingButton();
+                    }
+                } catch(e) {}
             }
         });
         return rawOpen.apply(this, arguments);
     };
 
+    // Patch Fetch (Version passive pour ne pas bloquer la boutique)
     const originalFetch = window.fetch;
     window.fetch = function(...args) {
         return originalFetch(...args).then(response => {
             const url = (typeof args[0] === 'string') ? args[0] : args[0].url;
             if (url && url.includes('sticker-trading')) {
-                response.clone().json().then(json => handleData(json)).catch(() => {});
+                                response.clone().json().then(json => {
+                    if (json?.Data?.Sets) {
+                        albumData = json.Data;
+                        createFloatingButton();
+                    }
+                }).catch(() => {});
             }
             return response;
         });
