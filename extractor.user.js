@@ -3,17 +3,16 @@
 // @namespace   UserScripts
 // @match       https://*.monopolygo.com/*
 // @grant       none
-// @version     1.61
-// @run-at      document-start
-// @author      Droopygoon with Gemini
-// @downloadURL https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
-// @updateURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
+// @version     1.62
+// @author      Droopygoon
+// @downloadURL https://droopygoon/mgo-album-extractor/extractor.user.js
+// @updateURL   https://droopygoon/mgo-album-extractor/extractor.user.js
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.61"; // Pense à changer ça ici et dans le header à chaque fois
+    const CURRENT_VERSION = "1.62"; // Pense à changer ça ici et dans le header à chaque fois
     let albumData = null;
     let showGolds = true;
 
@@ -57,30 +56,18 @@
     XMLHttpRequest.prototype.open = function() {
         this.addEventListener('load', () => {
             if (this.responseURL.includes('sticker-trading')) {
-                                try {
-                    const json = JSON.parse(this.responseText);
-                    if (json?.Data?.Sets) {
-                        albumData = json.Data;
-                        createFloatingButton();
-                    }
-                } catch(e) {}
+                try { handleData(JSON.parse(this.responseText)); } catch(e) {}
             }
         });
         return rawOpen.apply(this, arguments);
     };
 
-    // Patch Fetch (Version passive pour ne pas bloquer la boutique)
     const originalFetch = window.fetch;
     window.fetch = function(...args) {
         return originalFetch(...args).then(response => {
             const url = (typeof args[0] === 'string') ? args[0] : args[0].url;
             if (url && url.includes('sticker-trading')) {
-                                response.clone().json().then(json => {
-                    if (json?.Data?.Sets) {
-                        albumData = json.Data;
-                        createFloatingButton();
-                    }
-                }).catch(() => {});
+                response.clone().json().then(json => handleData(json)).catch(() => {});
             }
             return response;
         });
