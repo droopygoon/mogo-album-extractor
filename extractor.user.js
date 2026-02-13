@@ -3,7 +3,7 @@
 // @namespace   UserScripts
 // @match       https://*.monopolygo.com/*
 // @grant       none
-// @version     1.5
+// @version     1.6
 // @run-at      document-start
 // @author      Droopygoon with Gemini
 // @downloadURL https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
@@ -13,51 +13,71 @@
 (function() {
     'use strict';
 
+    const CURRENT_VERSION = "1.6"; // Pense à changer ça ici et dans le header à chaque fois
     let albumData = null;
     let showGolds = true;
 
-    // --- Interception Non-Intrusive ---
+    // --- Gestion de la notification de mise à jour ---
+    function checkUpdateNotification() {
+        const lastVersion = localStorage.getItem('mgo_extractor_version');
+        if (lastVersion && lastVersion !== CURRENT_VERSION) {
+            showUpdateToast(`🚀 Mise à jour installée : v${CURRENT_VERSION}`);
+        }
+        localStorage.setItem('mgo_extractor_version', CURRENT_VERSION);
+    }
 
-    // Patch XHR
+    function showUpdateToast(message) {
+        const toast = document.createElement('div');
+        toast.setAttribute('style', `
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            background: #27ae60; color: white; padding: 12px 25px; border-radius: 50px;
+            z-index: 10001; font-family: sans-serif; font-weight: bold;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: opacity 0.5s;
+        `);
+        toast.innerHTML = message;
+        document.body.appendChild(toast);
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            setTimeout(() => toast.remove(), 500);
+        }, 4000);
+    }
+
+    // --- Lancement du check ---
+    checkUpdateNotification();
+
+    // --- Interception des données (Version Passive/Stable) ---
+    const handleData = (json) => {
+        if (json?.Data?.Sets) {
+            albumData = json.Data;
+            createFloatingButton();
+        }
+    };
+
     const rawOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function() {
         this.addEventListener('load', () => {
             if (this.responseURL.includes('sticker-trading')) {
-                try {
-                    const json = JSON.parse(this.responseText);
-                    if (json?.Data?.Sets) {
-                        albumData = json.Data;
-                        createFloatingButton();
-                    }
-                } catch(e) {}
+                try { handleData(JSON.parse(this.responseText)); } catch(e) {}
             }
         });
         return rawOpen.apply(this, arguments);
     };
 
-    // Patch Fetch (Version passive pour ne pas bloquer la boutique)
     const originalFetch = window.fetch;
     window.fetch = function(...args) {
         return originalFetch(...args).then(response => {
             const url = (typeof args[0] === 'string') ? args[0] : args[0].url;
             if (url && url.includes('sticker-trading')) {
-                response.clone().json().then(json => {
-                    if (json?.Data?.Sets) {
-                        albumData = json.Data;
-                        createFloatingButton();
-                    }
-                }).catch(() => {});
+                response.clone().json().then(json => handleData(json)).catch(() => {});
             }
             return response;
         });
     };
 
-    // --- Logique de rendu ---
-    // (Inchangée pour garder ton formatage parfait)
+    // --- Logique de rendu (Inchangée) ---
     function generateContent() {
         let mLines = [], dLines = [];
         let rawM = "❌ MES MANQUANTES :\n", rawD = "✅ MES DOUBLES :\n";
-
         albumData.Sets.forEach((set, i) => {
             let mList = [], dList = [], rawMList = [];
             set.Stickers.forEach(s => {
@@ -72,7 +92,6 @@
             if (mList.length) { mLines.push(`<div>${badge}${mList.join(',')}</div>`); rawM += `${i+1}-${rawMList.join(',')}\n`; }
             if (dList.length) { dLines.push(`<div>${badge}${dList.join(',')}</div>`); rawD += `${i+1}-${dList.join(',')}\n`; }
         });
-
         const mid = Math.ceil(mLines.length / 2);
         return { mCol1: mLines.slice(0, mid).join(''), mCol2: mLines.slice(mid).join(''), dCol: dLines.join(''), rawM, rawD };
     }
@@ -91,7 +110,7 @@
         const b = document.createElement('button');
         b.id = 'btn-album-float';
         b.innerHTML = '🐾 Bilan Album';
-        b.setAttribute('style', 'position:fixed;bottom:25px;right:25px;z-index:9999;padding:12px 20px;background:#4287f5;color:white;border-radius:30px;border:none;cursor:pointer;font-weight:bold;box-shadow:0 4px 15px rgba(0,0,0,0.4);');
+        b.setAttribute('style', 'position:fixed;bottom:25px;right:25px;z-index:9999;padding:12px 20px;background:#4287f5;color:white;border-radius:30px;border:none;cursor:pointer;font-weight:bold;box-shadow:0 4px 15px rgba(66,135,245,0.4);');
         b.onclick = showModal;
         document.body.appendChild(b);
     }
