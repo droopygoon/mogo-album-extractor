@@ -3,7 +3,7 @@
 // @namespace   UserScripts
 // @match       https://*.monopolygo.com/*
 // @grant       none
-// @version     1.63
+// @version     1.64
 // @author      Droopygoon
 // @downloadURL https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // @updateURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
@@ -12,7 +12,7 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.63";
+    const CURRENT_VERSION = "1.64";
     let albumData = null;
     let showGolds = true;
 
@@ -100,7 +100,7 @@
         const overlay = document.createElement('div');
         overlay.id = 'album-modal-overlay';
         overlay.setAttribute('style', 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:10000;display:flex;justify-content:center;align-items:center;backdrop-filter:blur(3px);');
-
+        
         overlay.innerHTML = `
             <div style="width:900px; max-width:95%; max-height:90vh; background:#f8f9fa; border-radius:15px; overflow:hidden; display:flex; flex-direction:column; font-family:sans-serif;">
                 <div style="padding:15px 20px; background:#4287f5; color:white; display:flex; justify-content:space-between; align-items:center;">
@@ -161,7 +161,7 @@
         // --- Actions ---
         document.getElementById('close-modal').onclick = () => overlay.remove();
         document.getElementById('toggle-gold').onchange = (e) => { showGolds = e.target.checked; showModal(); };
-
+        
         const copyToClip = (text, btn) => {
             navigator.clipboard.writeText(text).then(() => {
                 const old = btn.innerHTML; btn.innerHTML = "✅ Copié !"; btn.style.background = "#27ae60";
@@ -176,7 +176,7 @@
             const fMissing = parseFriendData(document.getElementById('friend-missing').value);
             const fDoubles = parseFriendData(document.getElementById('friend-doubles').value);
             const resultsDiv = document.getElementById('compare-results');
-
+            
             let canGet = "", canGive = "";
 
             albumData.Sets.forEach((set, i) => {
@@ -210,3 +210,4 @@
                 </div>`;
         };
     }
+})();
