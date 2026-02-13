@@ -3,7 +3,7 @@
 // @namespace   UserScripts
 // @match       https://*.monopolygo.com/*
 // @grant       none
-// @version     1.6
+// @version     1.61
 // @run-at      document-start
 // @author      Droopygoon with Gemini
 // @downloadURL https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
@@ -13,7 +13,7 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.6"; // Pense à changer ça ici et dans le header à chaque fois
+    const CURRENT_VERSION = "1.61"; // Pense à changer ça ici et dans le header à chaque fois
     let albumData = null;
     let showGolds = true;
 
