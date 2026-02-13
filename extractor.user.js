@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name        Monopoly Go - Album Extractor (Stable)
+// @name        Monopoly Go - Album Extractor
 // @namespace   UserScripts
 // @match       https://*.monopolygo.com/*
 // @grant       none
