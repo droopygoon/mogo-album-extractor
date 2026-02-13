@@ -5,8 +5,8 @@
 // @grant       none
 // @version     1.63
 // @author      Droopygoon
-// @downloadURL https://droopygoon/mgo-album-extractor/extractor.user.js
-// @updateURL   https://droopygoon/mgo-album-extractor/extractor.user.js
+// @downloadURL https://droopygoon/mogo-album-extractor/extractor.user.js
+// @updateURL   https://droopygoon/mogo-album-extractor/extractor.user.js
 // ==/UserScript==
 
 (function() {
