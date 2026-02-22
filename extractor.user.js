@@ -20,7 +20,23 @@
 
     let albumData = null;
     let showGolds = true;
+// --- Gestion Notification ---
+    function checkUpdateNotification() {
+        const lastVersion = localStorage.getItem('mgo_extractor_version');
+        if (lastVersion && lastVersion !== CURRENT_VERSION) {
+            showUpdateToast(`🚀 Mise à jour v${CURRENT_VERSION} : Mode Comparaison ajouté !`);
+        }
+        localStorage.setItem('mgo_extractor_version', CURRENT_VERSION);
+    }
 
+    function showUpdateToast(msg) {
+        const t = document.createElement('div');
+        t.setAttribute('style', 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#27ae60;color:white;padding:12px 25px;border-radius:50px;z-index:10001;font-family:sans-serif;font-weight:bold;box-shadow:0 4px 15px rgba(0,0,0,0.2);transition:opacity 0.5s;');
+        t.innerHTML = msg; document.body.appendChild(t);
+        setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 500); }, 4000);
+    }
+
+    checkUpdateNotification();
     function getOrCreateUserID() {
         let id = localStorage.getItem('mgo_user_id');
         if (!id) {
