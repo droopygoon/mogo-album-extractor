@@ -4,7 +4,7 @@
 // @match       https://*.monopolygo.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      zopkkmdbmvypptbumnta.supabase.co
-// @version     1.66
+// @version     1.67
 // @author      Droopygoon
 // @downloadURL https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // @updateURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
@@ -13,7 +13,7 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.66";
+    const CURRENT_VERSION = "1.67";
     const SB_RPC_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/rpc/sync_player_data";
     const SB_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/players_data";
     const SB_KEY = "sb_publishable_E5_01nYHlSHOuywiICnbTQ_lKk1wN0i";
@@ -36,7 +36,10 @@
         setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 500); }, 4000);
     }
 
-    checkUpdateNotification();
+    // Lancement immédiat de la vérification
+    if (document.readyState === 'complete') checkUpdateNotification();
+    else window.addEventListener('load', checkUpdateNotification);
+    
     function getOrCreateUserID() {
         let id = localStorage.getItem('mgo_user_id');
         if (!id) {
