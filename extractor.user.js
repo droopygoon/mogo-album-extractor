@@ -24,7 +24,7 @@
     function checkUpdateNotification() {
         const lastVersion = localStorage.getItem('mgo_extractor_version');
         if (lastVersion && lastVersion !== CURRENT_VERSION) {
-            showUpdateToast(`🚀 Mise à jour v${CURRENT_VERSION} : Mode Comparaison ajouté !`);
+            showUpdateToast(`🚀 Mise à jour v${CURRENT_VERSION} : Mode Synchronisation ajouté !`);
         }
         localStorage.setItem('mgo_extractor_version', CURRENT_VERSION);
     }
