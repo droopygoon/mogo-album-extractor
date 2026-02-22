@@ -4,7 +4,7 @@
 // @match       https://*.monopolygo.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      zopkkmdbmvypptbumnta.supabase.co
-// @version     1.65
+// @version     1.66
 // @author      Droopygoon
 // @downloadURL https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // @updateURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
@@ -13,7 +13,7 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.65";
+    const CURRENT_VERSION = "1.66";
     const SB_RPC_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/rpc/sync_player_data";
     const SB_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/players_data";
     const SB_KEY = "sb_publishable_E5_01nYHlSHOuywiICnbTQ_lKk1wN0i";
