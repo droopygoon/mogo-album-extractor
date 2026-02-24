@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name        Monopoly Go - Album Extractor
+// @name        Monopoly Go - Album Extractor 2
 // @namespace   UserScripts
 // @match       https://*.monopolygo.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      zopkkmdbmvypptbumnta.supabase.co
-// @version     1.76
+// @version     1.82
 // @author      Droopygoon
 // @downloadURL https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // @updateURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
@@ -13,7 +13,7 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.76";
+    const CURRENT_VERSION = "1.82";
     const SB_RPC_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/rpc/sync_player_data";
     const SB_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/players_data";
     const SB_KEY = "sb_publishable_E5_01nYHlSHOuywiICnbTQ_lKk1wN0i";
@@ -21,7 +21,26 @@
     let albumData = null;
     let showGolds = true;
 
-    // --- Fonctions d'Identification ---
+    // --- Gestion Notification ---
+    function checkUpdateNotification() {
+        const lastVersion = localStorage.getItem('mgo_extractor_version');
+        if (lastVersion && lastVersion !== CURRENT_VERSION) {
+            showUpdateToast(`🚀 Mise à jour v${CURRENT_VERSION} : Ergonomie & Favoris !`);
+        }
+        localStorage.setItem('mgo_extractor_version', CURRENT_VERSION);
+    }
+
+    function showUpdateToast(msg) {
+        const t = document.createElement('div');
+        t.setAttribute('style', 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#27ae60;color:white;padding:12px 25px;border-radius:50px;z-index:10001;font-family:sans-serif;font-weight:bold;box-shadow:0 4px 15px rgba(0,0,0,0.2);transition:opacity 0.5s;');
+        t.innerHTML = msg; document.body.appendChild(t);
+        setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 500); }, 4000);
+    }
+
+    if (document.readyState === 'complete') checkUpdateNotification();
+    else window.addEventListener('load', checkUpdateNotification);
+
+    // --- Fonctions Utilitaires ---
     function getPlayerNameFromDOM() {
         const nameElem = document.querySelector('[data-testid="user-name"]');
         return nameElem ? nameElem.innerText.trim().toUpperCase().replace(/\s+/g, '_') : "JOUEUR";
@@ -44,25 +63,16 @@
         return d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     }
 
-    // --- Appels API ---
+    // --- Communications Cloud ---
     async function syncToCloud(data) {
         const userId = getOrCreateUserID();
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "POST",
                 url: SB_RPC_URL,
-                headers: { 
-                    "apikey": SB_KEY, 
-                    "Authorization": `Bearer ${SB_KEY}`, 
-                    "Content-Type": "application/json",
-                    "Prefer": "resolution=merge-duplicates"
-                },
-                data: JSON.stringify({ 
-                    p_user_id: userId, 
-                    p_missing: data.rawM, 
-                    p_doubles: data.rawD 
-                }),
-                onload: (res) => (res.status >= 200 && res.status < 300) ? resolve(true) : reject(`Erreur ${res.status}`),
+                headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}`, "Content-Type": "application/json" },
+                data: JSON.stringify({ p_user_id: userId, p_missing: data.rawM, p_doubles: data.rawD }),
+                onload: (res) => (res.status >= 200 && res.status < 300) ? resolve(true) : reject(`Erreur RPC ${res.status}`),
                 onerror: () => reject("Erreur Réseau")
             });
         });
@@ -75,18 +85,18 @@
                 url: `${SB_URL}?user_id=eq.${friendId.toUpperCase()}`,
                 headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}` },
                 onload: (res) => {
-                    try { 
-                        const result = JSON.parse(res.responseText); 
+                    try {
+                        const result = JSON.parse(res.responseText);
                         if (result.length > 0) resolve(result[0]);
-                        else reject("Introuvable");
-                    } catch(e) { reject("Erreur JSON"); }
+                        else reject("ID introuvable");
+                    } catch(e) { reject("Données invalides"); }
                 },
                 onerror: () => reject("Erreur Réseau")
             });
         });
     }
 
-    // --- Interception Réseau (Base 1.67) ---
+    // --- Interception des données du jeu ---
     const handleData = (json) => { if (json?.Data?.Sets) { albumData = json.Data; createFloatingButton(); } };
     const rawOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function() {
@@ -102,6 +112,7 @@
         });
     };
 
+    // --- Logique Album ---
     function parseFriendData(text) {
         const result = {}; if(!text) return result;
         text.split('\n').forEach(line => {
@@ -140,8 +151,7 @@
         const b = document.createElement('button');
         b.id = 'btn-album-float'; b.innerHTML = '🐾 Bilan Album';
         b.setAttribute('style', 'position:fixed;bottom:25px;right:25px;z-index:9999;padding:12px 20px;background:#4287f5;color:white;border-radius:30px;border:none;cursor:pointer;font-weight:bold;box-shadow:0 4px 15px rgba(66,135,245,0.4);');
-        b.onclick = () => showModal(); 
-        document.body.appendChild(b);
+        b.onclick = showModal; document.body.appendChild(b);
     }
 
     function showModal() {
@@ -153,8 +163,8 @@
         overlay.id = 'album-modal-overlay';
         overlay.setAttribute('style', 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:10000;display:flex;justify-content:center;align-items:center;backdrop-filter:blur(3px);');
 
-        const friends = JSON.parse(localStorage.getItem('mgo_saved_friends') || "[]");
-        let friendsOptions = friends.map(f => `<option value="${f}">${f}</option>`).join('');
+        const getFavs = () => JSON.parse(localStorage.getItem('mgo_saved_friends') || "[]");
+        let friendsOptions = getFavs().map(f => `<option value="${f}">${f}</option>`).join('');
 
         overlay.innerHTML = `
             <div style="width:900px; max-width:95%; max-height:90vh; background:#f8f9fa; border-radius:15px; overflow:hidden; display:flex; flex-direction:column; font-family:sans-serif;">
@@ -170,7 +180,7 @@
                 <div id="content-view" style="display:block; padding:20px; overflow-y:auto; background:#fff;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; background:#f0f7ff; padding:10px; border-radius:8px; border:1px solid #bae0ff;">
                         <div style="display:flex; align-items:center; gap:8px;">
-                            <strong>Mon ID : <span id="display-my-id" style="color:#4287f5; font-size:1rem;">${myId}</span></strong>
+                            <strong>ID : <span id="display-my-id" style="color:#4287f5; font-size:1.1rem; cursor:pointer;">${myId}</span></strong>
                             <button id="copy-my-id" style="background:#4287f5; color:white; border:none; padding:4px 8px; font-size:0.7rem; border-radius:4px; cursor:pointer;">Copier</button>
                             <button id="import-my-id" style="background:#666; color:white; border:none; padding:4px 8px; font-size:0.7rem; border-radius:4px; cursor:pointer;">Importer ID</button>
                         </div>
@@ -181,11 +191,11 @@
                     </div>
                     <div style="display:grid; grid-template-columns: 2fr 1fr; gap:20px;">
                         <div>
-                            <div style="display:flex; justify-content:space-between; border-bottom:2px solid #ffebeb; margin-bottom:10px;"><h3 style="color:#e44d26; font-size:0.9rem;">❌ MANQUANTES</h3></div>
+                            <div style="display:flex; justify-content:space-between; border-bottom:2px solid #ffebeb; margin-bottom:10px;"><h3 style="color:#e44d26; font-size:0.9rem;">❌ MANQUANTES</h3><button id="copy-m" style="background:#666; color:white; border:none; padding:3px 8px; font-size:0.7rem; border-radius:3px; cursor:pointer;">Copier</button></div>
                             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; font-family:monospace; font-size:0.85rem;"><div>${data.mCol1}</div><div>${data.mCol2}</div></div>
                         </div>
                         <div style="border-left:1px solid #eee; padding-left:20px;">
-                            <div style="display:flex; justify-content:space-between; border-bottom:2px solid #e8f5e9; margin-bottom:10px;"><h3 style="color:#27ae60; font-size:0.9rem;">✅ DOUBLES</h3></div>
+                            <div style="display:flex; justify-content:space-between; border-bottom:2px solid #e8f5e9; margin-bottom:10px;"><h3 style="color:#27ae60; font-size:0.9rem;">✅ DOUBLES</h3><button id="copy-d" style="background:#666; color:white; border:none; padding:3px 8px; font-size:0.7rem; border-radius:3px; cursor:pointer;">Copier</button></div>
                             <div style="font-family:monospace; font-size:0.85rem;">${data.dCol}</div>
                         </div>
                     </div>
@@ -194,19 +204,17 @@
                 <div id="content-compare" style="display:none; padding:20px; overflow-y:auto; background:#fff;">
                     <div style="margin-bottom:20px; border-bottom:1px solid #eee; padding-bottom:15px;">
                         <h4 style="margin:0 0 10px 0; color:#4287f5;">1. Charger un ami</h4>
-                        <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
-                            <select id="friend-select" style="padding:10px; border-radius:8px; border:1px solid #ddd; background:white; font-size:0.85rem; flex:1;">
-                                <option value="">-- Mes Favoris --</option>
+                        <div style="display:flex; gap:10px; align-items:center;">
+                            <select id="friend-select" style="width:180px; padding:10px; border-radius:8px; border:1px solid #ddd; background:white;">
+                                <option value="">-- Favoris --</option>
                                 ${friendsOptions}
                             </select>
-                        </div>
-                        <div style="display:flex; gap:10px; align-items:center;">
                             <input type="text" id="friend-id-input" placeholder="ID de l'ami..." style="flex:1; padding:10px; border-radius:8px; border:1px solid #ddd;">
                             <button id="btn-load-friend" style="padding:10px 20px; background:#4287f5; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Récupérer</button>
-                            <button id="btn-save-friend" style="display:none; padding:10px; background:#f39c12; color:white; border:none; border-radius:8px; cursor:pointer;">⭐</button>
-                            <button id="btn-del-friend" style="display:none; padding:10px; background:#e74c3c; color:white; border:none; border-radius:8px; cursor:pointer;">🗑️</button>
+                            <button id="btn-save-friend" style="display:none; padding:10px; background:#f39c12; color:white; border:none; border-radius:8px; cursor:pointer; width:44px;">⭐</button>
+                            <button id="btn-del-friend" style="display:none; padding:10px; background:#e74c3c; color:white; border:none; border-radius:8px; cursor:pointer; width:44px;">🗑️</button>
                         </div>
-                        <div id="friend-status" style="margin-top:8px; font-size:0.8rem; color:#666; font-style:italic; min-height:1.2em;"></div>
+                        <div id="friend-status" style="margin-top:8px; font-size:0.85rem; color:#666;"></div>
                     </div>
                     <div>
                         <h4 style="margin:0 0 15px 0; color:#666;">2. Détails & Comparaison</h4>
@@ -220,54 +228,113 @@
                                 <textarea id="friend-doubles" style="width:100%; height:160px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;"></textarea>
                             </div>
                         </div>
+                        <button id="run-manual-compare" style="width:100%; padding:8px; background:#eee; border:1px solid #ccc; border-radius:8px; cursor:pointer; font-weight:bold; margin-bottom:10px;">Comparer manuellement</button>
                     </div>
-                    <div id="compare-results" style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; margin-top:20px; border-top:2px solid #f0f0f0; padding-top:20px;"></div>
+                    <div id="compare-results" style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; border-top:2px solid #f0f0f0; padding-top:20px;"></div>
                 </div>
             </div>`;
 
         document.body.appendChild(overlay);
 
-        // Actions ID
-        document.getElementById('copy-my-id').onclick = () => { navigator.clipboard.writeText(myId); alert("ID Copié !"); };
-        document.getElementById('import-my-id').onclick = () => {
-            const n = prompt("Entre l'ID à importer (ex: EMMANUEL-XXXX) :", myId);
-            if(n) { localStorage.setItem('mgo_user_id', n.toUpperCase()); showModal(); }
+        // --- Logique UI et Event Listeners ---
+        const fInput = document.getElementById('friend-id-input');
+        const fSelect = document.getElementById('friend-select');
+        const fStatus = document.getElementById('friend-status');
+        const btnLoad = document.getElementById('btn-load-friend');
+        const btnSave = document.getElementById('btn-save-friend');
+        const btnDel = document.getElementById('btn-del-friend');
+
+        const updateFavButtons = (id) => {
+            const favs = getFavs();
+            const upperID = id.trim().toUpperCase();
+            if (!upperID) { btnSave.style.display = 'none'; btnDel.style.display = 'none'; return; }
+            if (favs.includes(upperID)) {
+                btnSave.style.display = 'none';
+                btnDel.style.display = 'block';
+            } else {
+                btnSave.style.display = 'block';
+                btnDel.style.display = 'none';
+            }
         };
 
-        // Gestion Favoris
-        const fSelect = document.getElementById('friend-select'), fInput = document.getElementById('friend-id-input'), fStatus = document.getElementById('friend-status'), btnSave = document.getElementById('btn-save-friend'), btnDel = document.getElementById('btn-del-friend');
-        
-        fSelect.onchange = () => { 
-            if (fSelect.value) { 
-                fInput.value = fSelect.value; 
-                btnDel.style.display = 'block'; 
-                btnSave.style.display = 'none'; 
-            } else { btnDel.style.display = 'none'; } 
-        };
-        
-        btnSave.onclick = () => { 
-            let list = JSON.parse(localStorage.getItem('mgo_saved_friends') || "[]"); 
-            if (!list.includes(fInput.value.toUpperCase())) { 
-                list.push(fInput.value.toUpperCase()); 
-                localStorage.setItem('mgo_saved_friends', JSON.stringify(list)); 
-                showModal(); document.getElementById('tab-compare').click(); 
-            } 
-        };
-        
-        btnDel.onclick = () => { 
-            if(confirm("Supprimer cet ami ?")) { 
-                let list = JSON.parse(localStorage.getItem('mgo_saved_friends') || "[]").filter(f => f !== fSelect.value); 
-                localStorage.setItem('mgo_saved_friends', JSON.stringify(list)); 
-                showModal(); document.getElementById('tab-compare').click(); 
-            } 
+        const copyToClip = (text, btn, msg = "Copié !") => {
+            navigator.clipboard.writeText(text).then(() => {
+                const old = btn.innerHTML; btn.innerHTML = msg;
+                if(btn.id !== "btn-sync-cloud") btn.style.background = "#27ae60";
+                setTimeout(() => {
+                    btn.innerHTML = old;
+                    if(btn.id !== "btn-sync-cloud") btn.style.background = (btn.id === "copy-my-id" || btn.id === "btn-load-friend") ? "#4287f5" : "#666";
+                }, 2000);
+            });
         };
 
-        // Sync & Navigation
+        const runCompareLogic = (fMissingRaw, fDoublesRaw) => {
+            const fMissing = parseFriendData(fMissingRaw), fDoubles = parseFriendData(fDoublesRaw);
+            const resultsDiv = document.getElementById('compare-results');
+            let canGet = "", canGive = "";
+            albumData.Sets.forEach((set, i) => {
+                let setNum = i + 1, getList = [], giveList = [];
+                set.Stickers.forEach(s => {
+                    let id = s.StickerId.split('.').pop();
+                    if ([9,10,11].includes(s.Rarity)) return;
+                    if (s.OwnedCount === 0 && fDoubles[setNum]?.includes(id)) getList.push(id);
+                    if (s.OwnedCount > 1 && fMissing[setNum]?.includes(id)) giveList.push(id);
+                });
+                const badge = `<span style="font-weight:bold; color:#4287f5;">${setNum}-</span>`;
+                if (getList.length) canGet += `<div>${badge}${getList.join(',')}</div>`;
+                if (giveList.length) canGive += `<div>${badge}${giveList.join(',')}</div>`;
+            });
+            resultsDiv.innerHTML = `<div style="background:#e8f5e9; padding:15px; border-radius:10px; border:1px solid #c8e6c9;"><h4 style="margin:0 0 10px 0; color:#2e7d32;">🎁 Reçevables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGet || "Aucun"}</div></div><div style="background:#fff3e0; padding:15px; border-radius:10px; border:1px solid #ef6c00;"><h4 style="margin:0 0 10px 0; color:#ef6c00;">🤝 Donnables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGive || "Aucun"}</div></div>`;
+        };
+
+        // Evenements
+        document.getElementById('copy-my-id').onclick = (e) => copyToClip(myId, e.target);
         document.getElementById('btn-sync-cloud').onclick = async (e) => {
             const btn = e.target; btn.innerHTML = "⌛ Synchro..."; btn.disabled = true;
-            try { await syncToCloud(data); btn.innerHTML = "✅ Partagé !"; btn.style.background = "#27ae60"; } 
-            catch (err) { btn.innerHTML = "❌ " + err; btn.style.background = "#e44d26"; }
+            try {
+                await syncToCloud(data);
+                btn.innerHTML = "✅ Synchro & ID Copié !"; btn.style.background = "#27ae60";
+            } catch (err) { btn.innerHTML = "❌ Erreur"; btn.style.background = "#e44d26"; }
             setTimeout(() => { btn.innerHTML = "☁️ Partager mon Album"; btn.disabled = false; btn.style.background = "#27ae60"; }, 3000);
+        };
+
+        fSelect.onchange = () => { fInput.value = fSelect.value; updateFavButtons(fSelect.value); };
+        fInput.oninput = () => updateFavButtons(fInput.value);
+
+        btnLoad.onclick = async () => {
+            const id = fInput.value.trim(); if (!id) return;
+            btnLoad.innerHTML = "⌛...";
+            try {
+                const friendData = await fetchFriendFromCloud(id);
+                document.getElementById('friend-missing').value = friendData.missing_text;
+                document.getElementById('friend-doubles').value = friendData.doubles_text;
+                fStatus.innerHTML = `📅 Mise à jour : <b>${formatDate(friendData.updated_at)}</b>`;
+                runCompareLogic(friendData.missing_text, friendData.doubles_text);
+                btnLoad.style.background = "#27ae60"; btnLoad.innerHTML = "✅";
+                setTimeout(() => { btnLoad.style.background = "#4287f5"; btnLoad.innerHTML = "Récupérer"; }, 1500);
+                updateFavButtons(id);
+            } catch (err) { alert(err); btnLoad.innerHTML = "Récupérer"; }
+        };
+
+        btnSave.onclick = () => {
+            const id = fInput.value.trim().toUpperCase();
+            let favs = getFavs();
+            if (id && !favs.includes(id)) {
+                favs.push(id);
+                localStorage.setItem('mgo_saved_friends', JSON.stringify(favs));
+                const opt = document.createElement('option'); opt.value = id; opt.text = id;
+                fSelect.add(opt); fSelect.value = id;
+                updateFavButtons(id);
+            }
+        };
+
+        btnDel.onclick = () => {
+            const id = fInput.value.trim().toUpperCase();
+            if (confirm(`Supprimer ${id} ?`)) {
+                let favs = getFavs().filter(f => f !== id);
+                localStorage.setItem('mgo_saved_friends', JSON.stringify(favs));
+                showModal(); document.getElementById('tab-compare').click();
+            }
         };
 
         const vTab = document.getElementById('tab-view'), cTab = document.getElementById('tab-compare'), vContent = document.getElementById('content-view'), cContent = document.getElementById('content-compare');
@@ -275,40 +342,8 @@
         cTab.onclick = () => { cTab.style.background = "#fff"; vTab.style.background = "#eee"; cContent.style.display = "block"; vContent.style.display = "none"; };
         document.getElementById('close-modal').onclick = () => overlay.remove();
         document.getElementById('toggle-gold').onchange = (e) => { showGolds = e.target.checked; showModal(); };
-
-        // Logique Comparaison
-        document.getElementById('btn-load-friend').onclick = async () => {
-            const fId = fInput.value.trim(); if (!fId) return;
-            const btn = document.getElementById('btn-load-friend'); btn.innerHTML = "⌛..."; fStatus.innerHTML = "";
-            try {
-                const fData = await fetchFriendFromCloud(fId);
-                if (fData) {
-                    document.getElementById('friend-missing').value = fData.missing_text;
-                    document.getElementById('friend-doubles').value = fData.doubles_text;
-                    fStatus.innerHTML = `📅 Mise à jour : <b>${formatDate(fData.updated_at)}</b>`;
-                    
-                    const fM = parseFriendData(fData.missing_text), fD = parseFriendData(fData.doubles_text);
-                    const resDiv = document.getElementById('compare-results');
-                    let canGet = "", canGive = "";
-                    
-                    albumData.Sets.forEach((set, i) => {
-                        let sN = i + 1, gL = [], vL = [];
-                        set.Stickers.forEach(s => {
-                            let id = s.StickerId.split('.').pop();
-                            if ([9,10,11].includes(s.Rarity)) return;
-                            if (s.OwnedCount === 0 && fD[sN]?.includes(id)) gL.push(id);
-                            if (s.OwnedCount > 1 && fM[sN]?.includes(id)) vL.push(id);
-                        });
-                        if (gL.length) canGet += `<div><span style="font-weight:bold; color:#4287f5;">${sN}-</span>${gL.join(',')}</div>`;
-                        if (vL.length) canGive += `<div><span style="font-weight:bold; color:#4287f5;">${sN}-</span>${vL.join(',')}</div>`;
-                    });
-                    
-                    resDiv.innerHTML = `<div style="background:#e8f5e9; padding:15px; border-radius:10px; border:1px solid #c8e6c9;"><h4 style="margin:0 0 10px 0; color:#2e7d32;">🎁 Reçevables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGet || "Aucun"}</div></div><div style="background:#fff3e0; padding:15px; border-radius:10px; border:1px solid #ef6c00;"><h4 style="margin:0 0 10px 0; color:#ef6c00;">🤝 Donnables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGive || "Aucun"}</div></div>`;
-                    btn.innerHTML = "✅";
-                    
-                    if (!JSON.parse(localStorage.getItem('mgo_saved_friends') || "[]").includes(fId.toUpperCase())) btnSave.style.display = 'block';
-                }
-            } catch (err) { alert("ID introuvable"); btn.innerHTML = "Récupérer"; }
-        };
+        document.getElementById('run-manual-compare').onclick = () => runCompareLogic(document.getElementById('friend-missing').value, document.getElementById('friend-doubles').value);
+        document.getElementById('copy-m').onclick = (e) => copyToClip(data.rawM, e.target);
+        document.getElementById('copy-d').onclick = (e) => copyToClip(data.rawD, e.target);
     }
 })();
