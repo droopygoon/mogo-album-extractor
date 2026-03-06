@@ -1,19 +1,19 @@
 // ==UserScript==
-// @name        Monopoly Go - Album Extractor
-// @namespace   UserScripts
-// @match       https://*.monopolygo.com/*
-// @grant        GM_xmlhttpRequest
-// @connect      zopkkmdbmvypptbumnta.supabase.co
-// @version     1.82
-// @author      Droopygoon
-// @downloadURL https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
-// @updateURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
+// @name         Monopoly Go - Album Extractor
+// @namespace    UserScripts
+// @match         https://*.monopolygo.com/*
+// @grant         GM_xmlhttpRequest
+// @connect       zopkkmdbmvypptbumnta.supabase.co
+// @version      1.83
+// @author        Droopygoon & Emmanuel
+// @downloadURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
+// @updateURL     https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.82";
+    const CURRENT_VERSION = "1.83";
     const SB_RPC_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/rpc/sync_player_data";
     const SB_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/players_data";
     const SB_KEY = "sb_publishable_E5_01nYHlSHOuywiICnbTQ_lKk1wN0i";
@@ -25,7 +25,7 @@
     function checkUpdateNotification() {
         const lastVersion = localStorage.getItem('mgo_extractor_version');
         if (lastVersion && lastVersion !== CURRENT_VERSION) {
-            showUpdateToast(`🚀 Mise à jour v${CURRENT_VERSION} : Ergonomie & Favoris !`);
+            showUpdateToast(`🚀 Mise à jour v${CURRENT_VERSION} : Migration ID & Fix Import !`);
         }
         localStorage.setItem('mgo_extractor_version', CURRENT_VERSION);
     }
@@ -42,17 +42,24 @@
 
     // --- Fonctions Utilitaires ---
     function getPlayerNameFromDOM() {
-        const nameElem = document.querySelector('[data-testid="user-name"]');
-        return nameElem ? nameElem.innerText.trim().toUpperCase().replace(/\s+/g, '_') : "JOUEUR";
+        // Multi-sélecteurs pour Chrome/Safari et selon les mises à jour du jeu
+        const nameElem = document.querySelector('[data-testid="user-name"]') || document.querySelector('.user-name') || document.querySelector('div[class*="NameContainer"]');
+        let name = nameElem ? nameElem.innerText.trim().toUpperCase().replace(/\s+/g, '_') : "";
+        return name || "JOUEUR";
     }
 
     function getOrCreateUserID() {
         let id = localStorage.getItem('mgo_user_id');
-        if (!id) {
+
+        // MIGRATION : Si l'ID est ancien (pas de tiret ou trop court), on le reset
+        const isOldFormat = id && (!id.includes('-') || id.length < 8);
+
+        if (!id || isOldFormat) {
             const name = getPlayerNameFromDOM();
             const suffix = Math.random().toString(36).substring(2, 6).toUpperCase();
             id = `${name}-${suffix}`;
             localStorage.setItem('mgo_user_id', id);
+            console.log("Extraction : Nouvel ID généré : " + id);
         }
         return id;
     }
@@ -96,7 +103,7 @@
         });
     }
 
-    // --- Interception des données du jeu ---
+    // --- Interception des données ---
     const handleData = (json) => { if (json?.Data?.Sets) { albumData = json.Data; createFloatingButton(); } };
     const rawOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function() {
@@ -112,7 +119,6 @@
         });
     };
 
-    // --- Logique Album ---
     function parseFriendData(text) {
         const result = {}; if(!text) return result;
         text.split('\n').forEach(line => {
@@ -236,7 +242,7 @@
 
         document.body.appendChild(overlay);
 
-        // --- Logique UI et Event Listeners ---
+        // --- Logique UI ---
         const fInput = document.getElementById('friend-id-input');
         const fSelect = document.getElementById('friend-select');
         const fStatus = document.getElementById('friend-status');
@@ -287,13 +293,25 @@
             resultsDiv.innerHTML = `<div style="background:#e8f5e9; padding:15px; border-radius:10px; border:1px solid #c8e6c9;"><h4 style="margin:0 0 10px 0; color:#2e7d32;">🎁 Reçevables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGet || "Aucun"}</div></div><div style="background:#fff3e0; padding:15px; border-radius:10px; border:1px solid #ef6c00;"><h4 style="margin:0 0 10px 0; color:#ef6c00;">🤝 Donnables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGive || "Aucun"}</div></div>`;
         };
 
-        // Evenements
+        // --- Evenements ---
         document.getElementById('copy-my-id').onclick = (e) => copyToClip(myId, e.target);
+
+        // ACTION IMPORT ID
+        document.getElementById('import-my-id').onclick = () => {
+            const newId = prompt("Collez l'ID à importer (ex: NOM-ABCD) :", myId);
+            if (newId && newId.trim() !== "") {
+                localStorage.setItem('mgo_user_id', newId.trim().toUpperCase());
+                alert("ID mis à jour ! Le bilan va s'actualiser.");
+                showModal(); // Rafraîchit l'affichage
+            }
+        };
+
         document.getElementById('btn-sync-cloud').onclick = async (e) => {
             const btn = e.target; btn.innerHTML = "⌛ Synchro..."; btn.disabled = true;
             try {
                 await syncToCloud(data);
                 btn.innerHTML = "✅ Synchro & ID Copié !"; btn.style.background = "#27ae60";
+                navigator.clipboard.writeText(getOrCreateUserID());
             } catch (err) { btn.innerHTML = "❌ Erreur"; btn.style.background = "#e44d26"; }
             setTimeout(() => { btn.innerHTML = "☁️ Partager mon Album"; btn.disabled = false; btn.style.background = "#27ae60"; }, 3000);
         };
@@ -343,7 +361,9 @@
         document.getElementById('close-modal').onclick = () => overlay.remove();
         document.getElementById('toggle-gold').onchange = (e) => { showGolds = e.target.checked; showModal(); };
         document.getElementById('run-manual-compare').onclick = () => runCompareLogic(document.getElementById('friend-missing').value, document.getElementById('friend-doubles').value);
-        document.getElementById('copy-m').onclick = (e) => copyToClip(data.rawM, e.target);
-        document.getElementById('copy-d').onclick = (e) => copyToClip(data.rawD, e.target);
+
+        // BOUTONS COPIE AVEC EN-TETES
+        document.getElementById('copy-m').onclick = (e) => copyToClip("❌ MANQUANTES :\n" + data.rawM, e.target);
+        document.getElementById('copy-d').onclick = (e) => copyToClip("✅ DOUBLES :\n" + data.rawD, e.target);
     }
 })();
