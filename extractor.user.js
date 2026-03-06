@@ -4,7 +4,7 @@
 // @match         https://*.monopolygo.com/*
 // @grant         GM_xmlhttpRequest
 // @connect       zopkkmdbmvypptbumnta.supabase.co
-// @version      1.83
+// @version      1.84
 // @author        Droopygoon & Emmanuel
 // @downloadURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // @updateURL     https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
@@ -13,7 +13,7 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.83";
+    const CURRENT_VERSION = "1.84";
     const SB_RPC_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/rpc/sync_player_data";
     const SB_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/players_data";
     const SB_KEY = "sb_publishable_E5_01nYHlSHOuywiICnbTQ_lKk1wN0i";
@@ -25,7 +25,7 @@
     function checkUpdateNotification() {
         const lastVersion = localStorage.getItem('mgo_extractor_version');
         if (lastVersion && lastVersion !== CURRENT_VERSION) {
-            showUpdateToast(`🚀 Mise à jour v${CURRENT_VERSION} : Migration ID & Fix Import !`);
+            showUpdateToast(`🚀 v${CURRENT_VERSION} : Vos favoris sont maintenant synchronisés sur le Cloud !`);
         }
         localStorage.setItem('mgo_extractor_version', CURRENT_VERSION);
     }
@@ -42,7 +42,6 @@
 
     // --- Fonctions Utilitaires ---
     function getPlayerNameFromDOM() {
-        // Multi-sélecteurs pour Chrome/Safari et selon les mises à jour du jeu
         const nameElem = document.querySelector('[data-testid="user-name"]') || document.querySelector('.user-name') || document.querySelector('div[class*="NameContainer"]');
         let name = nameElem ? nameElem.innerText.trim().toUpperCase().replace(/\s+/g, '_') : "";
         return name || "JOUEUR";
@@ -50,19 +49,18 @@
 
     function getOrCreateUserID() {
         let id = localStorage.getItem('mgo_user_id');
-
-        // MIGRATION : Si l'ID est ancien (pas de tiret ou trop court), on le reset
         const isOldFormat = id && (!id.includes('-') || id.length < 8);
-
         if (!id || isOldFormat) {
             const name = getPlayerNameFromDOM();
             const suffix = Math.random().toString(36).substring(2, 6).toUpperCase();
             id = `${name}-${suffix}`;
             localStorage.setItem('mgo_user_id', id);
-            console.log("Extraction : Nouvel ID généré : " + id);
         }
         return id;
     }
+
+    function getLocalFavs() { return JSON.parse(localStorage.getItem('mgo_saved_friends') || "[]"); }
+    function setLocalFavs(arr) { localStorage.setItem('mgo_saved_friends', JSON.stringify([...new Set(arr)])); }
 
     function formatDate(dateStr) {
         if (!dateStr) return "Inconnue";
@@ -73,23 +71,29 @@
     // --- Communications Cloud ---
     async function syncToCloud(data) {
         const userId = getOrCreateUserID();
+        const favs = getLocalFavs();
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "POST",
                 url: SB_RPC_URL,
                 headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}`, "Content-Type": "application/json" },
-                data: JSON.stringify({ p_user_id: userId, p_missing: data.rawM, p_doubles: data.rawD }),
+                data: JSON.stringify({ 
+                    p_user_id: userId, 
+                    p_missing: data.rawM, 
+                    p_doubles: data.rawD,
+                    p_friends: favs // Envoi des favoris au Cloud
+                }),
                 onload: (res) => (res.status >= 200 && res.status < 300) ? resolve(true) : reject(`Erreur RPC ${res.status}`),
                 onerror: () => reject("Erreur Réseau")
             });
         });
     }
 
-    async function fetchFriendFromCloud(friendId) {
+    async function fetchPlayerData(targetId) {
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "GET",
-                url: `${SB_URL}?user_id=eq.${friendId.toUpperCase()}`,
+                url: `${SB_URL}?user_id=eq.${targetId.toUpperCase()}`,
                 headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}` },
                 onload: (res) => {
                     try {
@@ -160,17 +164,27 @@
         b.onclick = showModal; document.body.appendChild(b);
     }
 
-    function showModal() {
+    async function showModal() {
         const existing = document.getElementById('album-modal-overlay');
         if (existing) existing.remove();
+        
         const data = generateContent();
         const myId = getOrCreateUserID();
+
+        // Sync descendante des favoris au chargement
+        try {
+            const myRemoteData = await fetchPlayerData(myId);
+            if (myRemoteData && myRemoteData.friends_list) {
+                const merged = [...new Set([...getLocalFavs(), ...myRemoteData.friends_list])];
+                setLocalFavs(merged);
+            }
+        } catch(e) { console.log("Pas encore de favoris sur le cloud."); }
+
         const overlay = document.createElement('div');
         overlay.id = 'album-modal-overlay';
         overlay.setAttribute('style', 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:10000;display:flex;justify-content:center;align-items:center;backdrop-filter:blur(3px);');
 
-        const getFavs = () => JSON.parse(localStorage.getItem('mgo_saved_friends') || "[]");
-        let friendsOptions = getFavs().map(f => `<option value="${f}">${f}</option>`).join('');
+        const friendsOptions = getLocalFavs().map(f => `<option value="${f}">${f}</option>`).join('');
 
         overlay.innerHTML = `
             <div style="width:900px; max-width:95%; max-height:90vh; background:#f8f9fa; border-radius:15px; overflow:hidden; display:flex; flex-direction:column; font-family:sans-serif;">
@@ -251,7 +265,7 @@
         const btnDel = document.getElementById('btn-del-friend');
 
         const updateFavButtons = (id) => {
-            const favs = getFavs();
+            const favs = getLocalFavs();
             const upperID = id.trim().toUpperCase();
             if (!upperID) { btnSave.style.display = 'none'; btnDel.style.display = 'none'; return; }
             if (favs.includes(upperID)) {
@@ -295,14 +309,13 @@
 
         // --- Evenements ---
         document.getElementById('copy-my-id').onclick = (e) => copyToClip(myId, e.target);
-
-        // ACTION IMPORT ID
+        
         document.getElementById('import-my-id').onclick = () => {
             const newId = prompt("Collez l'ID à importer (ex: NOM-ABCD) :", myId);
             if (newId && newId.trim() !== "") {
                 localStorage.setItem('mgo_user_id', newId.trim().toUpperCase());
-                alert("ID mis à jour ! Le bilan va s'actualiser.");
-                showModal(); // Rafraîchit l'affichage
+                alert("ID mis à jour !");
+                showModal();
             }
         };
 
@@ -310,7 +323,7 @@
             const btn = e.target; btn.innerHTML = "⌛ Synchro..."; btn.disabled = true;
             try {
                 await syncToCloud(data);
-                btn.innerHTML = "✅ Synchro & ID Copié !"; btn.style.background = "#27ae60";
+                btn.innerHTML = "✅ Synchro & Favoris OK !"; btn.style.background = "#27ae60";
                 navigator.clipboard.writeText(getOrCreateUserID());
             } catch (err) { btn.innerHTML = "❌ Erreur"; btn.style.background = "#e44d26"; }
             setTimeout(() => { btn.innerHTML = "☁️ Partager mon Album"; btn.disabled = false; btn.style.background = "#27ae60"; }, 3000);
@@ -323,7 +336,7 @@
             const id = fInput.value.trim(); if (!id) return;
             btnLoad.innerHTML = "⌛...";
             try {
-                const friendData = await fetchFriendFromCloud(id);
+                const friendData = await fetchPlayerData(id);
                 document.getElementById('friend-missing').value = friendData.missing_text;
                 document.getElementById('friend-doubles').value = friendData.doubles_text;
                 fStatus.innerHTML = `📅 Mise à jour : <b>${formatDate(friendData.updated_at)}</b>`;
@@ -336,10 +349,10 @@
 
         btnSave.onclick = () => {
             const id = fInput.value.trim().toUpperCase();
-            let favs = getFavs();
+            let favs = getLocalFavs();
             if (id && !favs.includes(id)) {
                 favs.push(id);
-                localStorage.setItem('mgo_saved_friends', JSON.stringify(favs));
+                setLocalFavs(favs);
                 const opt = document.createElement('option'); opt.value = id; opt.text = id;
                 fSelect.add(opt); fSelect.value = id;
                 updateFavButtons(id);
@@ -349,8 +362,8 @@
         btnDel.onclick = () => {
             const id = fInput.value.trim().toUpperCase();
             if (confirm(`Supprimer ${id} ?`)) {
-                let favs = getFavs().filter(f => f !== id);
-                localStorage.setItem('mgo_saved_friends', JSON.stringify(favs));
+                let favs = getLocalFavs().filter(f => f !== id);
+                setLocalFavs(favs);
                 showModal(); document.getElementById('tab-compare').click();
             }
         };
@@ -361,8 +374,6 @@
         document.getElementById('close-modal').onclick = () => overlay.remove();
         document.getElementById('toggle-gold').onchange = (e) => { showGolds = e.target.checked; showModal(); };
         document.getElementById('run-manual-compare').onclick = () => runCompareLogic(document.getElementById('friend-missing').value, document.getElementById('friend-doubles').value);
-
-        // BOUTONS COPIE AVEC EN-TETES
         document.getElementById('copy-m').onclick = (e) => copyToClip("❌ MANQUANTES :\n" + data.rawM, e.target);
         document.getElementById('copy-d').onclick = (e) => copyToClip("✅ DOUBLES :\n" + data.rawD, e.target);
     }
