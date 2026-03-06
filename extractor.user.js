@@ -4,7 +4,7 @@
 // @match         https://*.monopolygo.com/*
 // @grant         GM_xmlhttpRequest
 // @connect       zopkkmdbmvypptbumnta.supabase.co
-// @version      1.87
+// @version      1.90
 // @author        Droopygoon & Emmanuel
 // @downloadURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // @updateURL     https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
@@ -13,7 +13,7 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.87";
+    const CURRENT_VERSION = "1.90";
     const SB_RPC_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/rpc/sync_player_data";
     const SB_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/players_data";
     const SB_KEY = "sb_publishable_E5_01nYHlSHOuywiICnbTQ_lKk1wN0i";
@@ -25,7 +25,7 @@
     function checkUpdateNotification() {
         const lastVersion = localStorage.getItem('mgo_extractor_version');
         if (lastVersion && lastVersion !== CURRENT_VERSION) {
-            showUpdateToast(`🚀 v${CURRENT_VERSION} : Synchro auto & Suppression favoris corrigées !`);
+            showUpdateToast(`🚀 v${CURRENT_VERSION} : Les Ors (Golds) sont maintenant visibles dans les Doubles !`);
         }
         localStorage.setItem('mgo_extractor_version', CURRENT_VERSION);
     }
@@ -77,11 +77,11 @@
                 method: "POST",
                 url: SB_RPC_URL,
                 headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}`, "Content-Type": "application/json" },
-                data: JSON.stringify({ 
-                    p_user_id: userId, 
-                    p_missing: data.rawM, 
+                data: JSON.stringify({
+                    p_user_id: userId,
+                    p_missing: data.rawM,
                     p_doubles: data.rawD,
-                    p_friends: favs 
+                    p_friends: favs
                 }),
                 onload: (res) => (res.status >= 200 && res.status < 300) ? resolve(true) : reject(`Erreur RPC ${res.status}`),
                 onerror: () => reject("Erreur Réseau")
@@ -142,18 +142,23 @@
             set.Stickers.forEach(s => {
                 let id = s.StickerId.split('.').pop();
                 let isGold = [9,10,11].includes(s.Rarity);
+
+                // Logique Manquantes
                 if (s.OwnedCount === 0) {
                     if (!isGold) { mList.push(id); rawMList.push(id); }
                     else if (showGolds) { mList.push(`<span style="color:#d4af37;font-weight:bold;">[${id}]</span>`); rawMList.push(`[${id}]`); }
-                } else if (s.OwnedCount > 1 && !isGold) {
-                    dList.push(id); rawDList.push(id);
+                }
+                // Logique Doubles
+                else if (s.OwnedCount > 1) {
+                    if (!isGold) { dList.push(id); rawDList.push(id); }
+                    else if (showGolds) { dList.push(`<span style="color:#d4af37;font-weight:bold;">[${id}]</span>`); rawDList.push(`[${id}]`); }
                 }
             });
             const badge = `<span style="display:inline-block;width:25px;color:#4287f5;font-weight:bold;">${i+1}-</span>`;
             if (mList.length) { mLines.push(`<div>${badge}${mList.join(',')}</div>`); rawM += `${i+1}-${rawMList.join(',')}\n`; }
             if (dList.length) { dLines.push(`<div>${badge}${dList.join(',')}</div>`); rawD += `${i+1}-${rawDList.join(',')}\n`; }
         });
-        return { mCol1: mLines.slice(0, Math.ceil(mLines.length/2)).join(''), mCol2: mLines.slice(Math.ceil(mLines.length/2)).join(''), dCol: dLines.join(''), rawM, rawD };
+        return { mHtml: mLines.join(''), dHtml: dLines.join(''), rawM, rawD };
     }
 
     function createFloatingButton() {
@@ -161,25 +166,20 @@
         const b = document.createElement('button');
         b.id = 'btn-album-float'; b.innerHTML = '🐾 Bilan Album';
         b.setAttribute('style', 'position:fixed;bottom:25px;right:25px;z-index:9999;padding:12px 20px;background:#4287f5;color:white;border-radius:30px;border:none;cursor:pointer;font-weight:bold;box-shadow:0 4px 15px rgba(66,135,245,0.4);');
-        b.onclick = showModal; document.body.appendChild(b);
+        b.onclick = () => showModal('view'); document.body.appendChild(b);
     }
 
-    async function showModal() {
-        const existing = document.getElementById('album-modal-overlay');
-        if (existing) existing.remove();
-        
-        const data = generateContent();
+    async function showModal(activeTab = 'view') {
         const myId = getOrCreateUserID();
-
-        // Sync descendante des favoris au chargement
         try {
             const myRemoteData = await fetchPlayerData(myId);
-            if (myRemoteData && myRemoteData.friends_list) {
-                const merged = [...new Set([...getLocalFavs(), ...myRemoteData.friends_list])];
-                setLocalFavs(merged);
-            }
-        } catch(e) { console.log("Pas encore de favoris sur le cloud."); }
+            if (myRemoteData && Array.isArray(myRemoteData.friends_list)) setLocalFavs(myRemoteData.friends_list);
+        } catch(e) {}
 
+        const existing = document.getElementById('album-modal-overlay');
+        if (existing) existing.remove();
+
+        const data = generateContent();
         const overlay = document.createElement('div');
         overlay.id = 'album-modal-overlay';
         overlay.setAttribute('style', 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:10000;display:flex;justify-content:center;align-items:center;backdrop-filter:blur(3px);');
@@ -193,43 +193,43 @@
                     <button id="close-modal" style="background:rgba(255,255,255,0.2); border:none; color:white; padding:5px 12px; border-radius:5px; cursor:pointer;">Fermer</button>
                 </div>
                 <div style="display:flex; background:#eee; border-bottom:1px solid #ddd;">
-                    <button id="tab-view" style="flex:1; padding:12px; border:none; background:#fff; cursor:pointer; font-weight:bold;">Mon Inventaire</button>
-                    <button id="tab-compare" style="flex:1; padding:12px; border:none; background:#eee; cursor:pointer; font-weight:bold; border-left:1px solid #ddd;">🤝 Comparer</button>
+                    <button id="tab-view" style="flex:1; padding:12px; border:none; background:${activeTab==='view'?'#fff':'#eee'}; cursor:pointer; font-weight:bold;">Mon Inventaire</button>
+                    <button id="tab-compare" style="flex:1; padding:12px; border:none; background:${activeTab==='comp'?'#fff':'#eee'}; cursor:pointer; font-weight:bold; border-left:1px solid #ddd;">🤝 Comparer</button>
                 </div>
 
-                <div id="content-view" style="display:block; padding:20px; overflow-y:auto; background:#fff;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; background:#f0f7ff; padding:10px; border-radius:8px; border:1px solid #bae0ff;">
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <strong>ID : <span id="display-my-id" style="color:#4287f5; font-size:1.1rem; cursor:pointer;">${myId}</span></strong>
-                            <button id="copy-my-id" style="background:#4287f5; color:white; border:none; padding:4px 8px; font-size:0.7rem; border-radius:4px; cursor:pointer;">Copier</button>
-                            <button id="import-my-id" style="background:#666; color:white; border:none; padding:4px 8px; font-size:0.7rem; border-radius:4px; cursor:pointer;">Importer ID</button>
+                <div id="content-view" style="display:${activeTab==='view'?'block':'none'}; padding:20px; overflow-y:auto; background:#fff;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; background:#f0f7ff; padding:10px; border-radius:8px; border:1px solid #bae0ff; flex-wrap:wrap; gap:10px;">
+                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                            <strong>ID : <span id="display-my-id" style="color:#4287f5; font-size:1.1rem;">${myId}</span></strong>
+                            <button id="copy-my-id" style="background:#4287f5; color:white; border:none; padding:6px 10px; font-size:0.75rem; border-radius:4px; cursor:pointer;">Copier</button>
+                            <button id="import-my-id" style="background:#666; color:white; border:none; padding:6px 10px; font-size:0.75rem; border-radius:4px; cursor:pointer;">Importer ID</button>
                         </div>
-                        <button id="btn-sync-cloud" style="background:#27ae60; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold;">☁️ Partager mon Album</button>
+                        <button id="btn-sync-cloud" style="background:#27ae60; color:white; border:none; padding:10px 15px; border-radius:5px; cursor:pointer; font-weight:bold;">☁️ Partager mon Album</button>
                     </div>
                     <div style="margin-bottom:15px; display:flex; align-items:center; gap:10px; font-size:0.85rem;">
-                        <input type="checkbox" id="toggle-gold" ${showGolds ? 'checked' : ''}> <label for="toggle-gold">Afficher les Ors [Golds]</label>
+                        <input type="checkbox" id="toggle-gold" ${showGolds ? 'checked' : ''}> <label for="toggle-gold">Afficher les Ors [Golds] (Manquantes & Doubles)</label>
                     </div>
-                    <div style="display:grid; grid-template-columns: 2fr 1fr; gap:20px;">
-                        <div>
+                    <div style="display:flex; flex-wrap:wrap; gap:20px;">
+                        <div style="flex:1; min-width:300px;">
                             <div style="display:flex; justify-content:space-between; border-bottom:2px solid #ffebeb; margin-bottom:10px;"><h3 style="color:#e44d26; font-size:0.9rem;">❌ MANQUANTES</h3><button id="copy-m" style="background:#666; color:white; border:none; padding:3px 8px; font-size:0.7rem; border-radius:3px; cursor:pointer;">Copier</button></div>
-                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; font-family:monospace; font-size:0.85rem;"><div>${data.mCol1}</div><div>${data.mCol2}</div></div>
+                            <div style="font-family:monospace; font-size:0.85rem;">${data.mHtml || "Aucune"}</div>
                         </div>
-                        <div style="border-left:1px solid #eee; padding-left:20px;">
+                        <div style="flex:1; min-width:300px; border-left:1px solid #eee; padding-left:10px;">
                             <div style="display:flex; justify-content:space-between; border-bottom:2px solid #e8f5e9; margin-bottom:10px;"><h3 style="color:#27ae60; font-size:0.9rem;">✅ DOUBLES</h3><button id="copy-d" style="background:#666; color:white; border:none; padding:3px 8px; font-size:0.7rem; border-radius:3px; cursor:pointer;">Copier</button></div>
-                            <div style="font-family:monospace; font-size:0.85rem;">${data.dCol}</div>
+                            <div style="font-family:monospace; font-size:0.85rem;">${data.dHtml || "Aucune"}</div>
                         </div>
                     </div>
                 </div>
 
-                <div id="content-compare" style="display:none; padding:20px; overflow-y:auto; background:#fff;">
+                <div id="content-compare" style="display:${activeTab==='comp'?'block':'none'}; padding:20px; overflow-y:auto; background:#fff;">
                     <div style="margin-bottom:20px; border-bottom:1px solid #eee; padding-bottom:15px;">
                         <h4 style="margin:0 0 10px 0; color:#4287f5;">1. Charger un ami</h4>
-                        <div style="display:flex; gap:10px; align-items:center;">
+                        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                             <select id="friend-select" style="width:180px; padding:10px; border-radius:8px; border:1px solid #ddd; background:white;">
                                 <option value="">-- Favoris --</option>
                                 ${friendsOptions}
                             </select>
-                            <input type="text" id="friend-id-input" placeholder="ID de l'ami..." style="flex:1; padding:10px; border-radius:8px; border:1px solid #ddd;">
+                            <input type="text" id="friend-id-input" placeholder="ID de l'ami..." style="flex:1; min-width:150px; padding:10px; border-radius:8px; border:1px solid #ddd;">
                             <button id="btn-load-friend" style="padding:10px 20px; background:#4287f5; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Récupérer</button>
                             <button id="btn-save-friend" style="display:none; padding:10px; background:#f39c12; color:white; border:none; border-radius:8px; cursor:pointer; width:44px;">⭐</button>
                             <button id="btn-del-friend" style="display:none; padding:10px; background:#e74c3c; color:white; border:none; border-radius:8px; cursor:pointer; width:44px;">🗑️</button>
@@ -238,19 +238,19 @@
                     </div>
                     <div>
                         <h4 style="margin:0 0 15px 0; color:#666;">2. Détails & Comparaison</h4>
-                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-bottom:15px;">
-                            <div>
+                        <div style="display:flex; flex-wrap:wrap; gap:15px; margin-bottom:15px;">
+                            <div style="flex:1; min-width:280px;">
                                 <label style="display:block; font-size:0.75rem; font-weight:bold; color:#e44d26; margin-bottom:5px;">SES MANQUANTES</label>
                                 <textarea id="friend-missing" style="width:100%; height:160px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;"></textarea>
                             </div>
-                            <div>
+                            <div style="flex:1; min-width:280px;">
                                 <label style="display:block; font-size:0.75rem; font-weight:bold; color:#27ae60; margin-bottom:5px;">SES DOUBLES</label>
                                 <textarea id="friend-doubles" style="width:100%; height:160px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;"></textarea>
                             </div>
                         </div>
-                        <button id="run-manual-compare" style="width:100%; padding:8px; background:#eee; border:1px solid #ccc; border-radius:8px; cursor:pointer; font-weight:bold; margin-bottom:10px;">Comparer manuellement</button>
+                        <button id="run-manual-compare" style="width:100%; padding:10px; background:#eee; border:1px solid #ccc; border-radius:8px; cursor:pointer; font-weight:bold; margin-bottom:10px;">Comparer manuellement</button>
                     </div>
-                    <div id="compare-results" style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; border-top:2px solid #f0f0f0; padding-top:20px;"></div>
+                    <div id="compare-results" style="display:flex; flex-wrap:wrap; gap:20px; border-top:2px solid #f0f0f0; padding-top:20px;"></div>
                 </div>
             </div>`;
 
@@ -259,7 +259,6 @@
         // --- Logique UI ---
         const fInput = document.getElementById('friend-id-input');
         const fSelect = document.getElementById('friend-select');
-        const fStatus = document.getElementById('friend-status');
         const btnLoad = document.getElementById('btn-load-friend');
         const btnSave = document.getElementById('btn-save-friend');
         const btnDel = document.getElementById('btn-del-friend');
@@ -268,13 +267,9 @@
             const favs = getLocalFavs();
             const upperID = id.trim().toUpperCase();
             if (!upperID) { btnSave.style.display = 'none'; btnDel.style.display = 'none'; return; }
-            if (favs.includes(upperID)) {
-                btnSave.style.display = 'none';
-                btnDel.style.display = 'block';
-            } else {
-                btnSave.style.display = 'block';
-                btnDel.style.display = 'none';
-            }
+            const isFav = favs.includes(upperID);
+            btnSave.style.display = isFav ? 'none' : 'block';
+            btnDel.style.display = isFav ? 'block' : 'none';
         };
 
         const copyToClip = (text, btn, msg = "Copié !") => {
@@ -304,27 +299,23 @@
                 if (getList.length) canGet += `<div>${badge}${getList.join(',')}</div>`;
                 if (giveList.length) canGive += `<div>${badge}${giveList.join(',')}</div>`;
             });
-            resultsDiv.innerHTML = `<div style="background:#e8f5e9; padding:15px; border-radius:10px; border:1px solid #c8e6c9;"><h4 style="margin:0 0 10px 0; color:#2e7d32;">🎁 Reçevables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGet || "Aucun"}</div></div><div style="background:#fff3e0; padding:15px; border-radius:10px; border:1px solid #ef6c00;"><h4 style="margin:0 0 10px 0; color:#ef6c00;">🤝 Donnables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGive || "Aucun"}</div></div>`;
+            resultsDiv.innerHTML = `<div style="flex:1; min-width:250px; background:#e8f5e9; padding:15px; border-radius:10px; border:1px solid #c8e6c9;"><h4 style="margin:0 0 10px 0; color:#2e7d32;">🎁 Reçevables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGet || "Aucun"}</div></div><div style="flex:1; min-width:250px; background:#fff3e0; padding:15px; border-radius:10px; border:1px solid #ef6c00;"><h4 style="margin:0 0 10px 0; color:#ef6c00;">🤝 Donnables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGive || "Aucun"}</div></div>`;
         };
 
         // --- Evenements ---
         document.getElementById('copy-my-id').onclick = (e) => copyToClip(myId, e.target);
-        
         document.getElementById('import-my-id').onclick = () => {
-            const newId = prompt("Collez l'ID à importer (ex: NOM-ABCD) :", myId);
+            const newId = prompt("Collez l'ID à importer :", myId);
             if (newId && newId.trim() !== "") {
                 localStorage.setItem('mgo_user_id', newId.trim().toUpperCase());
-                alert("ID mis à jour !");
-                showModal();
+                showModal('view');
             }
         };
 
         document.getElementById('btn-sync-cloud').onclick = async (e) => {
             const btn = e.target; btn.innerHTML = "⌛ Synchro..."; btn.disabled = true;
-            try {
-                await syncToCloud(data);
-                btn.innerHTML = "✅ Synchro & Favoris OK !"; btn.style.background = "#27ae60";
-            } catch (err) { btn.innerHTML = "❌ Erreur"; btn.style.background = "#e44d26"; }
+            try { await syncToCloud(data); btn.innerHTML = "✅ Synchro & Favoris OK !"; btn.style.background = "#27ae60"; }
+            catch (err) { btn.innerHTML = "❌ Erreur"; btn.style.background = "#e44d26"; }
             setTimeout(() => { btn.innerHTML = "☁️ Partager mon Album"; btn.disabled = false; btn.style.background = "#27ae60"; }, 3000);
         };
 
@@ -338,7 +329,7 @@
                 const friendData = await fetchPlayerData(id);
                 document.getElementById('friend-missing').value = friendData.missing_text;
                 document.getElementById('friend-doubles').value = friendData.doubles_text;
-                fStatus.innerHTML = `📅 Mise à jour : <b>${formatDate(friendData.updated_at)}</b>`;
+                document.getElementById('friend-status').innerHTML = `📅 Mise à jour : <b>${formatDate(friendData.updated_at)}</b>`;
                 runCompareLogic(friendData.missing_text, friendData.doubles_text);
                 btnLoad.style.background = "#27ae60"; btnLoad.innerHTML = "✅";
                 setTimeout(() => { btnLoad.style.background = "#4287f5"; btnLoad.innerHTML = "Récupérer"; }, 1500);
@@ -346,44 +337,28 @@
             } catch (err) { alert(err); btnLoad.innerHTML = "Récupérer"; }
         };
 
-        // --- CORRECTION : Sync Auto lors de l'ajout ---
         btnSave.onclick = async () => {
             const id = fInput.value.trim().toUpperCase();
             let favs = getLocalFavs();
             if (id && !favs.includes(id)) {
-                btnSave.innerHTML = "⌛";
-                favs.push(id);
-                setLocalFavs(favs);
-                try {
-                    await syncToCloud(data); // Sync automatique au Cloud
-                    const opt = document.createElement('option'); opt.value = id; opt.text = id;
-                    fSelect.add(opt); fSelect.value = id;
-                    updateFavButtons(id);
-                    btnSave.innerHTML = "⭐";
-                } catch(e) { alert("Erreur de synchronisation cloud"); btnSave.innerHTML = "⭐"; }
+                favs.push(id); setLocalFavs(favs);
+                try { await syncToCloud(data); showModal('comp'); } catch(e) { alert("Erreur cloud"); }
             }
         };
 
-        // --- CORRECTION : Sync Auto lors de la suppression ---
         btnDel.onclick = async () => {
             const id = fInput.value.trim().toUpperCase();
             if (confirm(`Supprimer ${id} ?`)) {
-                btnDel.innerHTML = "⌛";
                 let favs = getLocalFavs().filter(f => f !== id);
                 setLocalFavs(favs);
-                try {
-                    await syncToCloud(data); // Sync automatique au Cloud
-                    showModal(); 
-                    document.getElementById('tab-compare').click();
-                } catch(e) { alert("Erreur de synchronisation cloud"); btnDel.innerHTML = "🗑️"; }
+                try { await syncToCloud(data); showModal('comp'); } catch(e) { alert("Erreur cloud"); }
             }
         };
 
-        const vTab = document.getElementById('tab-view'), cTab = document.getElementById('tab-compare'), vContent = document.getElementById('content-view'), cContent = document.getElementById('content-compare');
-        vTab.onclick = () => { vTab.style.background = "#fff"; cTab.style.background = "#eee"; vContent.style.display = "block"; cContent.style.display = "none"; };
-        cTab.onclick = () => { cTab.style.background = "#fff"; vTab.style.background = "#eee"; cContent.style.display = "block"; vContent.style.display = "none"; };
+        document.getElementById('tab-view').onclick = () => showModal('view');
+        document.getElementById('tab-compare').onclick = () => showModal('comp');
         document.getElementById('close-modal').onclick = () => overlay.remove();
-        document.getElementById('toggle-gold').onchange = (e) => { showGolds = e.target.checked; showModal(); };
+        document.getElementById('toggle-gold').onchange = (e) => { showGolds = e.target.checked; showModal(activeTab); };
         document.getElementById('run-manual-compare').onclick = () => runCompareLogic(document.getElementById('friend-missing').value, document.getElementById('friend-doubles').value);
         document.getElementById('copy-m').onclick = (e) => copyToClip("❌ MANQUANTES :\n" + data.rawM, e.target);
         document.getElementById('copy-d').onclick = (e) => copyToClip("✅ DOUBLES :\n" + data.rawD, e.target);
