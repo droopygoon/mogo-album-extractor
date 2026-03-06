@@ -4,7 +4,7 @@
 // @match         https://*.monopolygo.com/*
 // @grant         GM_xmlhttpRequest
 // @connect       zopkkmdbmvypptbumnta.supabase.co
-// @version      1.84
+// @version      1.86
 // @author        Droopygoon & Emmanuel
 // @downloadURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // @updateURL     https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
@@ -13,7 +13,7 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.84";
+    const CURRENT_VERSION = "1.86";
     const SB_RPC_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/rpc/sync_player_data";
     const SB_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/players_data";
     const SB_KEY = "sb_publishable_E5_01nYHlSHOuywiICnbTQ_lKk1wN0i";
@@ -21,11 +21,11 @@
     let albumData = null;
     let showGolds = true;
 
-    // --- Gestion Notification ---
+    // --- RESTAURATION : Notification de mise à jour ---
     function checkUpdateNotification() {
         const lastVersion = localStorage.getItem('mgo_extractor_version');
         if (lastVersion && lastVersion !== CURRENT_VERSION) {
-            showUpdateToast(`🚀 v${CURRENT_VERSION} : Vos favoris sont maintenant synchronisés sur le Cloud !`);
+            showUpdateToast(`🚀 v${CURRENT_VERSION} : Synchro Cloud des favoris & Correctifs activés !`);
         }
         localStorage.setItem('mgo_extractor_version', CURRENT_VERSION);
     }
@@ -49,8 +49,7 @@
 
     function getOrCreateUserID() {
         let id = localStorage.getItem('mgo_user_id');
-        const isOldFormat = id && (!id.includes('-') || id.length < 8);
-        if (!id || isOldFormat) {
+        if (!id || !id.includes('-') || id.length < 8) {
             const name = getPlayerNameFromDOM();
             const suffix = Math.random().toString(36).substring(2, 6).toUpperCase();
             id = `${name}-${suffix}`;
@@ -69,9 +68,10 @@
     }
 
     // --- Communications Cloud ---
-    async function syncToCloud(data) {
+    async function syncToCloud(fullData = null) {
         const userId = getOrCreateUserID();
         const favs = getLocalFavs();
+        const data = fullData || generateContent();
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "POST",
@@ -80,11 +80,11 @@
                 data: JSON.stringify({ 
                     p_user_id: userId, 
                     p_missing: data.rawM, 
-                    p_doubles: data.rawD,
-                    p_friends: favs // Envoi des favoris au Cloud
+                    p_doubles: data.rawD, 
+                    p_friends: favs 
                 }),
-                onload: (res) => (res.status >= 200 && res.status < 300) ? resolve(true) : reject(`Erreur RPC ${res.status}`),
-                onerror: () => reject("Erreur Réseau")
+                onload: (res) => (res.status >= 200 && res.status < 300) ? resolve(true) : reject(),
+                onerror: () => reject()
             });
         });
     }
@@ -99,30 +99,15 @@
                     try {
                         const result = JSON.parse(res.responseText);
                         if (result.length > 0) resolve(result[0]);
-                        else reject("ID introuvable");
-                    } catch(e) { reject("Données invalides"); }
+                        else reject("Introuvable");
+                    } catch(e) { reject(); }
                 },
-                onerror: () => reject("Erreur Réseau")
+                onerror: () => reject()
             });
         });
     }
 
-    // --- Interception des données ---
-    const handleData = (json) => { if (json?.Data?.Sets) { albumData = json.Data; createFloatingButton(); } };
-    const rawOpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function() {
-        this.addEventListener('load', () => { if (this.responseURL.includes('sticker-trading')) { try { handleData(JSON.parse(this.responseText)); } catch(e) {} } });
-        return rawOpen.apply(this, arguments);
-    };
-    const originalFetch = window.fetch;
-    window.fetch = function(...args) {
-        return originalFetch(...args).then(response => {
-            const url = (typeof args[0] === 'string') ? args[0] : args[0].url;
-            if (url?.includes('sticker-trading')) { response.clone().json().then(handleData).catch(() => {}); }
-            return response;
-        });
-    };
-
+    // --- Logique Album ---
     function parseFriendData(text) {
         const result = {}; if(!text) return result;
         text.split('\n').forEach(line => {
@@ -136,6 +121,7 @@
     }
 
     function generateContent() {
+        if (!albumData) return { rawM: "", rawD: "" };
         let mLines = [], dLines = [], rawM = "", rawD = "";
         albumData.Sets.forEach((set, i) => {
             let mList = [], dList = [], rawMList = [], rawDList = [];
@@ -153,7 +139,12 @@
             if (mList.length) { mLines.push(`<div>${badge}${mList.join(',')}</div>`); rawM += `${i+1}-${rawMList.join(',')}\n`; }
             if (dList.length) { dLines.push(`<div>${badge}${dList.join(',')}</div>`); rawD += `${i+1}-${rawDList.join(',')}\n`; }
         });
-        return { mCol1: mLines.slice(0, Math.ceil(mLines.length/2)).join(''), mCol2: mLines.slice(Math.ceil(mLines.length/2)).join(''), dCol: dLines.join(''), rawM, rawD };
+        return { 
+            mCol1: mLines.slice(0, Math.ceil(mLines.length/2)).join(''), 
+            mCol2: mLines.slice(Math.ceil(mLines.length/2)).join(''), 
+            dCol: dLines.join(''), 
+            rawM, rawD 
+        };
     }
 
     function createFloatingButton() {
@@ -171,14 +162,13 @@
         const data = generateContent();
         const myId = getOrCreateUserID();
 
-        // Sync descendante des favoris au chargement
-        try {
-            const myRemoteData = await fetchPlayerData(myId);
-            if (myRemoteData && myRemoteData.friends_list) {
-                const merged = [...new Set([...getLocalFavs(), ...myRemoteData.friends_list])];
+        // Synchro descendante silencieuse
+        fetchPlayerData(myId).then(remote => {
+            if (remote?.friends_list) {
+                const merged = [...new Set([...getLocalFavs(), ...remote.friends_list])];
                 setLocalFavs(merged);
             }
-        } catch(e) { console.log("Pas encore de favoris sur le cloud."); }
+        }).catch(() => {});
 
         const overlay = document.createElement('div');
         overlay.id = 'album-modal-overlay';
@@ -200,14 +190,13 @@
                 <div id="content-view" style="display:block; padding:20px; overflow-y:auto; background:#fff;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; background:#f0f7ff; padding:10px; border-radius:8px; border:1px solid #bae0ff;">
                         <div style="display:flex; align-items:center; gap:8px;">
-                            <strong>ID : <span id="display-my-id" style="color:#4287f5; font-size:1.1rem; cursor:pointer;">${myId}</span></strong>
-                            <button id="copy-my-id" style="background:#4287f5; color:white; border:none; padding:4px 8px; font-size:0.7rem; border-radius:4px; cursor:pointer;">Copier</button>
+                            <strong>ID : <span id="display-my-id" style="color:#4287f5; font-size:1.1rem;">${myId}</span></strong>
                             <button id="import-my-id" style="background:#666; color:white; border:none; padding:4px 8px; font-size:0.7rem; border-radius:4px; cursor:pointer;">Importer ID</button>
                         </div>
                         <button id="btn-sync-cloud" style="background:#27ae60; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold;">☁️ Partager mon Album</button>
                     </div>
-                    <div style="margin-bottom:15px; display:flex; align-items:center; gap:10px; font-size:0.85rem;">
-                        <input type="checkbox" id="toggle-gold" ${showGolds ? 'checked' : ''}> <label for="toggle-gold">Afficher les Ors [Golds]</label>
+                    <div style="margin-bottom:10px; font-size:0.9rem;">
+                         <input type="checkbox" id="toggle-gold" ${showGolds ? 'checked' : ''}> <label for="toggle-gold">Afficher les Ors [Golds]</label>
                     </div>
                     <div style="display:grid; grid-template-columns: 2fr 1fr; gap:20px;">
                         <div>
@@ -236,145 +225,125 @@
                         </div>
                         <div id="friend-status" style="margin-top:8px; font-size:0.85rem; color:#666;"></div>
                     </div>
-                    <div>
-                        <h4 style="margin:0 0 15px 0; color:#666;">2. Détails & Comparaison</h4>
-                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-bottom:15px;">
-                            <div>
-                                <label style="display:block; font-size:0.75rem; font-weight:bold; color:#e44d26; margin-bottom:5px;">SES MANQUANTES</label>
-                                <textarea id="friend-missing" style="width:100%; height:160px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;"></textarea>
-                            </div>
-                            <div>
-                                <label style="display:block; font-size:0.75rem; font-weight:bold; color:#27ae60; margin-bottom:5px;">SES DOUBLES</label>
-                                <textarea id="friend-doubles" style="width:100%; height:160px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;"></textarea>
-                            </div>
-                        </div>
-                        <button id="run-manual-compare" style="width:100%; padding:8px; background:#eee; border:1px solid #ccc; border-radius:8px; cursor:pointer; font-weight:bold; margin-bottom:10px;">Comparer manuellement</button>
-                    </div>
-                    <div id="compare-results" style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; border-top:2px solid #f0f0f0; padding-top:20px;"></div>
+                    <div id="compare-results" style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;"></div>
                 </div>
             </div>`;
 
         document.body.appendChild(overlay);
 
-        // --- Logique UI ---
         const fInput = document.getElementById('friend-id-input');
         const fSelect = document.getElementById('friend-select');
-        const fStatus = document.getElementById('friend-status');
-        const btnLoad = document.getElementById('btn-load-friend');
         const btnSave = document.getElementById('btn-save-friend');
         const btnDel = document.getElementById('btn-del-friend');
+        const fStatus = document.getElementById('friend-status');
 
         const updateFavButtons = (id) => {
             const favs = getLocalFavs();
             const upperID = id.trim().toUpperCase();
             if (!upperID) { btnSave.style.display = 'none'; btnDel.style.display = 'none'; return; }
             if (favs.includes(upperID)) {
-                btnSave.style.display = 'none';
-                btnDel.style.display = 'block';
+                btnSave.style.display = 'none'; btnDel.style.display = 'block';
             } else {
-                btnSave.style.display = 'block';
-                btnDel.style.display = 'none';
+                btnSave.style.display = 'block'; btnDel.style.display = 'none';
             }
         };
 
-        const copyToClip = (text, btn, msg = "Copié !") => {
-            navigator.clipboard.writeText(text).then(() => {
-                const old = btn.innerHTML; btn.innerHTML = msg;
-                if(btn.id !== "btn-sync-cloud") btn.style.background = "#27ae60";
-                setTimeout(() => {
-                    btn.innerHTML = old;
-                    if(btn.id !== "btn-sync-cloud") btn.style.background = (btn.id === "copy-my-id" || btn.id === "btn-load-friend") ? "#4287f5" : "#666";
-                }, 2000);
-            });
+        // --- EVENTS ---
+        btnSave.onclick = async () => {
+            const id = fInput.value.trim().toUpperCase();
+            if (!id) return;
+            let favs = getLocalFavs();
+            favs.push(id);
+            setLocalFavs(favs);
+            try {
+                await syncToCloud();
+                const opt = document.createElement('option'); opt.value = id; opt.text = id;
+                fSelect.add(opt); fSelect.value = id;
+                updateFavButtons(id);
+            } catch(e) { alert("Erreur synchro Cloud"); }
         };
 
-        const runCompareLogic = (fMissingRaw, fDoublesRaw) => {
-            const fMissing = parseFriendData(fMissingRaw), fDoubles = parseFriendData(fDoublesRaw);
-            const resultsDiv = document.getElementById('compare-results');
-            let canGet = "", canGive = "";
-            albumData.Sets.forEach((set, i) => {
-                let setNum = i + 1, getList = [], giveList = [];
-                set.Stickers.forEach(s => {
-                    let id = s.StickerId.split('.').pop();
-                    if ([9,10,11].includes(s.Rarity)) return;
-                    if (s.OwnedCount === 0 && fDoubles[setNum]?.includes(id)) getList.push(id);
-                    if (s.OwnedCount > 1 && fMissing[setNum]?.includes(id)) giveList.push(id);
+        btnDel.onclick = async () => {
+            const id = fInput.value.trim().toUpperCase();
+            if (!id || !confirm(`Supprimer ${id} ?`)) return;
+            let favs = getLocalFavs().filter(f => f !== id);
+            setLocalFavs(favs);
+            try {
+                await syncToCloud();
+                for (let i=0; i<fSelect.options.length; i++) {
+                    if (fSelect.options[i].value === id) { fSelect.remove(i); break; }
+                }
+                fInput.value = "";
+                updateFavButtons("");
+            } catch(e) { alert("Erreur synchro Cloud"); }
+        };
+
+        document.getElementById('btn-load-friend').onclick = async () => {
+            const id = fInput.value.trim(); if (!id) return;
+            const btn = document.getElementById('btn-load-friend');
+            btn.innerHTML = "⌛...";
+            try {
+                const friendData = await fetchPlayerData(id);
+                fStatus.innerHTML = `📅 Mise à jour : <b>${formatDate(friendData.updated_at)}</b>`;
+                const fMissing = parseFriendData(friendData.missing_text);
+                const fDoubles = parseFriendData(friendData.doubles_text);
+                let canGet = "", canGive = "";
+                albumData.Sets.forEach((set, i) => {
+                    let setNum = i + 1, getL = [], giveL = [];
+                    set.Stickers.forEach(s => {
+                        let sid = s.StickerId.split('.').pop();
+                        if ([9,10,11].includes(s.Rarity)) return;
+                        if (s.OwnedCount === 0 && fDoubles[setNum]?.includes(sid)) getL.push(sid);
+                        if (s.OwnedCount > 1 && fMissing[setNum]?.includes(sid)) giveL.push(sid);
+                    });
+                    if (getL.length) canGet += `<div><b>${setNum}-</b>${getL.join(',')}</div>`;
+                    if (giveL.length) canGive += `<div><b>${setNum}-</b>${giveL.join(',')}</div>`;
                 });
-                const badge = `<span style="font-weight:bold; color:#4287f5;">${setNum}-</span>`;
-                if (getList.length) canGet += `<div>${badge}${getList.join(',')}</div>`;
-                if (giveList.length) canGive += `<div>${badge}${giveList.join(',')}</div>`;
-            });
-            resultsDiv.innerHTML = `<div style="background:#e8f5e9; padding:15px; border-radius:10px; border:1px solid #c8e6c9;"><h4 style="margin:0 0 10px 0; color:#2e7d32;">🎁 Reçevables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGet || "Aucun"}</div></div><div style="background:#fff3e0; padding:15px; border-radius:10px; border:1px solid #ef6c00;"><h4 style="margin:0 0 10px 0; color:#ef6c00;">🤝 Donnables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGive || "Aucun"}</div></div>`;
+                document.getElementById('compare-results').innerHTML = `
+                    <div style="background:#e8f5e9; padding:10px; border-radius:8px;"><b>🎁 Reçevables :</b><br>${canGet || "Aucun"}</div>
+                    <div style="background:#fff3e0; padding:10px; border-radius:8px;"><b>🤝 Donnables :</b><br>${canGive || "Aucun"}</div>`;
+                btn.innerHTML = "Récupérer";
+            } catch(e) { alert("ID non trouvé."); btn.innerHTML = "Récupérer"; }
         };
 
-        // --- Evenements ---
-        document.getElementById('copy-my-id').onclick = (e) => copyToClip(myId, e.target);
-        
+        // UI Tabs & Toggles
+        document.getElementById('toggle-gold').onchange = (e) => { showGolds = e.target.checked; showModal(); };
+        fSelect.onchange = () => { fInput.value = fSelect.value; updateFavButtons(fSelect.value); };
+        fInput.oninput = () => updateFavButtons(fInput.value);
+        document.getElementById('tab-view').onclick = () => { 
+            document.getElementById('content-view').style.display = "block"; 
+            document.getElementById('content-compare').style.display = "none";
+            document.getElementById('tab-view').style.background = "#fff";
+            document.getElementById('tab-compare').style.background = "#eee";
+        };
+        document.getElementById('tab-compare').onclick = () => { 
+            document.getElementById('content-compare').style.display = "block"; 
+            document.getElementById('content-view').style.display = "none";
+            document.getElementById('tab-compare').style.background = "#fff";
+            document.getElementById('tab-view').style.background = "#eee";
+        };
+        document.getElementById('close-modal').onclick = () => overlay.remove();
+        document.getElementById('copy-m').onclick = () => navigator.clipboard.writeText("❌ MANQUANTES :\n" + data.rawM);
+        document.getElementById('copy-d').onclick = () => navigator.clipboard.writeText("✅ DOUBLES :\n" + data.rawD);
         document.getElementById('import-my-id').onclick = () => {
-            const newId = prompt("Collez l'ID à importer (ex: NOM-ABCD) :", myId);
-            if (newId && newId.trim() !== "") {
-                localStorage.setItem('mgo_user_id', newId.trim().toUpperCase());
-                alert("ID mis à jour !");
-                showModal();
-            }
+            const n = prompt("Nouvel ID :", myId);
+            if(n) { localStorage.setItem('mgo_user_id', n.trim().toUpperCase()); showModal(); }
         };
-
         document.getElementById('btn-sync-cloud').onclick = async (e) => {
             const btn = e.target; btn.innerHTML = "⌛ Synchro..."; btn.disabled = true;
             try {
                 await syncToCloud(data);
-                btn.innerHTML = "✅ Synchro & Favoris OK !"; btn.style.background = "#27ae60";
-                navigator.clipboard.writeText(getOrCreateUserID());
+                btn.innerHTML = "✅ Synchro OK !"; btn.style.background = "#27ae60";
             } catch (err) { btn.innerHTML = "❌ Erreur"; btn.style.background = "#e44d26"; }
-            setTimeout(() => { btn.innerHTML = "☁️ Partager mon Album"; btn.disabled = false; btn.style.background = "#27ae60"; }, 3000);
+            setTimeout(() => { btn.innerHTML = "☁️ Partager mon Album"; btn.disabled = false; btn.style.background = "#27ae60"; }, 2000);
         };
-
-        fSelect.onchange = () => { fInput.value = fSelect.value; updateFavButtons(fSelect.value); };
-        fInput.oninput = () => updateFavButtons(fInput.value);
-
-        btnLoad.onclick = async () => {
-            const id = fInput.value.trim(); if (!id) return;
-            btnLoad.innerHTML = "⌛...";
-            try {
-                const friendData = await fetchPlayerData(id);
-                document.getElementById('friend-missing').value = friendData.missing_text;
-                document.getElementById('friend-doubles').value = friendData.doubles_text;
-                fStatus.innerHTML = `📅 Mise à jour : <b>${formatDate(friendData.updated_at)}</b>`;
-                runCompareLogic(friendData.missing_text, friendData.doubles_text);
-                btnLoad.style.background = "#27ae60"; btnLoad.innerHTML = "✅";
-                setTimeout(() => { btnLoad.style.background = "#4287f5"; btnLoad.innerHTML = "Récupérer"; }, 1500);
-                updateFavButtons(id);
-            } catch (err) { alert(err); btnLoad.innerHTML = "Récupérer"; }
-        };
-
-        btnSave.onclick = () => {
-            const id = fInput.value.trim().toUpperCase();
-            let favs = getLocalFavs();
-            if (id && !favs.includes(id)) {
-                favs.push(id);
-                setLocalFavs(favs);
-                const opt = document.createElement('option'); opt.value = id; opt.text = id;
-                fSelect.add(opt); fSelect.value = id;
-                updateFavButtons(id);
-            }
-        };
-
-        btnDel.onclick = () => {
-            const id = fInput.value.trim().toUpperCase();
-            if (confirm(`Supprimer ${id} ?`)) {
-                let favs = getLocalFavs().filter(f => f !== id);
-                setLocalFavs(favs);
-                showModal(); document.getElementById('tab-compare').click();
-            }
-        };
-
-        const vTab = document.getElementById('tab-view'), cTab = document.getElementById('tab-compare'), vContent = document.getElementById('content-view'), cContent = document.getElementById('content-compare');
-        vTab.onclick = () => { vTab.style.background = "#fff"; cTab.style.background = "#eee"; vContent.style.display = "block"; cContent.style.display = "none"; };
-        cTab.onclick = () => { cTab.style.background = "#fff"; vTab.style.background = "#eee"; cContent.style.display = "block"; vContent.style.display = "none"; };
-        document.getElementById('close-modal').onclick = () => overlay.remove();
-        document.getElementById('toggle-gold').onchange = (e) => { showGolds = e.target.checked; showModal(); };
-        document.getElementById('run-manual-compare').onclick = () => runCompareLogic(document.getElementById('friend-missing').value, document.getElementById('friend-doubles').value);
-        document.getElementById('copy-m').onclick = (e) => copyToClip("❌ MANQUANTES :\n" + data.rawM, e.target);
-        document.getElementById('copy-d').onclick = (e) => copyToClip("✅ DOUBLES :\n" + data.rawD, e.target);
     }
+
+    // --- Interception ---
+    const handleData = (json) => { if (json?.Data?.Sets) { albumData = json.Data; createFloatingButton(); } };
+    const rawOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function() {
+        this.addEventListener('load', () => { if (this.responseURL.includes('sticker-trading')) { try { handleData(JSON.parse(this.responseText)); } catch(e) {} } });
+        return rawOpen.apply(this, arguments);
+    };
 })();
