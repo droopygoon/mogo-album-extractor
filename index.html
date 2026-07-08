@@ -62,7 +62,7 @@
         </header>
 
         <div class="cta-section">
-            <a href="extractor.user.js" class="btn">🚀 Installer le Script (v1.92)</a>
+            <a href="extractor.user.js" class="btn" id="install-btn">🚀 Installer le Script <span class="script-version">(...)</span></a>
             <p style="font-size: 0.85rem; color: #888; margin-top: 15px;">Le script intercepte uniquement les données de votre navigateur. Aucune connexion directe à votre compte n'est effectuée.</p>
         </div>
 
@@ -97,25 +97,47 @@
                 <h4>📸 Aide visuelle pour Chrome :</h4>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                     <div class="img-container">
-						Image 1
-						<a href="https://freeimage.host/i/qHURSTv"><img src="https://iili.io/qHURSTv.jpg" alt="qHURSTv.jpg" border="0"></a>
+                        Image 1
+                        <a href="https://freeimage.host/i/qHURSTv"><img src="https://iili.io/qHURSTv.jpg" alt="qHURSTv.jpg" border="0"></a>
                     </div>
                     <div class="img-container">
-						Image 2
-						<a href="https://freeimage.host/i/qHURUjR"><img src="https://iili.io/qHURUjR.md.jpg" alt="qHURUjR.md.jpg" border="0"></a>
+                        Image 2
+                        <a href="https://freeimage.host/i/qHURUjR"><img src="https://iili.io/qHURUjR.md.jpg" alt="qHURUjR.md.jpg" border="0"></a>
                     </div>
                 </div>
             </div>
         </div>
 
         <div class="footer">
-            Développé avec ❤️ par <strong>Droopygoon</strong> &bull; Version 1.92 &bull; © 2026<br>
+            Développé avec ❤️ par <strong>Droopygoon</strong> &bull; Version <span class="script-version">...</span> &bull; © 2026<br>
             <small>Ce script n'est pas affilié à Scopely ou Monopoly Go.</small>
         </div>
     </div>
 
     <script async src="//s.imgur.com/min/embed.js" charset="utf-8"></script>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // Lecture du fichier de script directement sur le dépôt local/GitHub Pages
+            fetch('extractor.user.js')
+                .then(response => response.text())
+                .then(text => {
+                    // Recherche de la ligne "@version x.xx" dans le code
+                    const match = text.match(/@version\s+([^\r\n]+)/);
+                    if (match && match[1]) {
+                        const version = match[1].trim();
+                        // Applique la version trouvée à tous les éléments concernés
+                        document.querySelectorAll('.script-version').forEach(elem => {
+                            if (elem.parentNode.id === 'install-btn') {
+                                elem.textContent = `(v${version})`;
+                            } else {
+                                elem.textContent = version;
+                            }
+                        });
+                    }
+                })
+                .catch(err => console.error("Impossible de récupérer la version automatiquement :", err));
+        });
+    </script>
 </body>
 </html>
-
-
