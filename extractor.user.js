@@ -4,7 +4,7 @@
 // @match         https://*.monopolygo.com/*
 // @grant         GM_xmlhttpRequest
 // @connect       firestore.googleapis.com
-// @version       1.93
+// @version       1.94
 // @author        Droopygoon
 // @downloadURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // @updateURL     https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
@@ -13,7 +13,7 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.93";
+    const CURRENT_VERSION = "1.94";
     
     // --- CONFIGURATION FIREBASE ---
     const FIREBASE_PROJECT_ID = "mogo-album-extractor"; 
@@ -21,12 +21,17 @@
 
     let albumData = null;
     let showGolds = true;
+    let currentActiveTab = 'view';
+    
+    // Données en cache pour éviter les requêtes réseau lors du masquage/affichage dynamique des Golds
+    let lastLoadedFriendData = null;
+    let lastGlobalResultsData = null;
 
     // --- Gestion Notification ---
     function checkUpdateNotification() {
         const lastVersion = localStorage.getItem('mgo_extractor_version');
         if (lastVersion && lastVersion !== CURRENT_VERSION) {
-            showUpdateToast(`🚀 v${CURRENT_VERSION} : Ajout des alias d'amis et de la recherche globale inversée !`);
+            showUpdateToast(`🚀 v${CURRENT_VERSION} : Sécurisation des alias, filtres Ors dynamiques et affichage global épuré !`);
         }
         localStorage.setItem('mgo_extractor_version', CURRENT_VERSION);
     }
@@ -60,7 +65,7 @@
         return id;
     }
 
-    // Gestion évoluée des favoris avec Alias (Format stocké en BD: "ID|ALIAS" ou simplement "ID" si pas d'alias)
+    // Gestion des favoris avec Alias
     function getLocalFavsObj() {
         const raw = localStorage.getItem('mgo_saved_friends_v2') || localStorage.getItem('mgo_saved_friends') || "[]";
         try {
@@ -83,7 +88,7 @@
     function saveLocalFavsObj(obj) {
         const arrFormat = Object.keys(obj).map(id => obj[id] ? `${id}|${obj[id]}` : id);
         localStorage.setItem('mgo_saved_friends_v2', JSON.stringify(arrFormat));
-        localStorage.setItem('mgo_saved_friends', JSON.stringify(arrFormat)); // Rétrocompatibilité
+        localStorage.setItem('mgo_saved_friends', JSON.stringify(arrFormat));
     }
 
     function formatDate(dateStr) {
@@ -99,7 +104,19 @@
         return Math.floor(Math.abs(d1 - d2) / (1000 * 60 * 60 * 24));
     }
 
-    // --- Communications Cloud (Firebase Firestore API REST) ---
+    function isGoldSticker(stickerId) {
+        if (!albumData) return false;
+        for (let set of albumData.Sets) {
+            for (let s of set.Stickers) {
+                if (s.StickerId.endsWith('.' + stickerId)) {
+                    return [9,10,11].includes(s.Rarity);
+                }
+            }
+        }
+        return false;
+    }
+
+    // --- Communications Cloud (Firebase) ---
     async function syncToCloud(data) {
         const userId = getOrCreateUserID();
         const favsObj = getLocalFavsObj();
@@ -140,14 +157,13 @@
                         const fields = result.fields;
                         if (fields) {
                             const rawFriends = fields.friends_list?.arrayValue?.values?.map(v => v.stringValue) || [];
-                            const formattedData = {
+                            resolve({
                                 user_id: fields.user_id?.stringValue || targetId,
                                 missing_text: fields.missing_text?.stringValue || "",
                                 doubles_text: fields.doubles_text?.stringValue || "",
                                 updated_at: fields.updated_at?.stringValue || "",
                                 friends_list: rawFriends
-                            };
-                            resolve(formattedData);
+                            });
                         } else { reject("Données vides"); }
                     } catch(e) { reject("Données invalides"); }
                 },
@@ -156,7 +172,7 @@
         });
     }
 
-    // --- Interception des données ---
+    // --- Interception des données réseau ---
     const handleData = (json) => { if (json?.Data?.Sets) { albumData = json.Data; createFloatingButton(); } };
     const rawOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function() {
@@ -178,7 +194,10 @@
             const match = line.match(/^(\d+)-(.*)$/);
             if (match) {
                 const setNum = parseInt(match[1]);
-                result[setNum] = match[2].split(',').map(id => id.trim().replace('[','').replace(']',''));
+                const ids = match[2].split(',')
+                                    .map(id => id.trim().replace('[','').replace(']',''))
+                                    .filter(id => id.length > 0); 
+                if(ids.length > 0) result[setNum] = ids;
             }
         });
         return result;
@@ -195,15 +214,20 @@
                 if (s.OwnedCount === 0) {
                     if (!isGold) { mList.push(id); rawMList.push(id); }
                     else if (showGolds) { mList.push(`<span style="color:#d4af37;font-weight:bold;">[${id}]</span>`); rawMList.push(`[${id}]`); }
+                    else { rawMList.push(`[${id}]`); } 
                 }
                 else if (s.OwnedCount > 1) {
                     if (!isGold) { dList.push(id); rawDList.push(id); }
                     else if (showGolds) { dList.push(`<span style="color:#d4af37;font-weight:bold;">[${id}]</span>`); rawDList.push(`[${id}]`); }
+                    else { rawDList.push(`[${id}]`); }
                 }
             });
             const badge = `<span style="display:inline-block;width:25px;color:#4287f5;font-weight:bold;">${i+1}-</span>`;
-            if (mList.length) { mLines.push(--i === -1 ? `<div>${badge}${mList.join(',')}</div>` : `<div>${badge}${mList.join(',')}</div>`); rawM += `${i+2}-${rawMList.join(',')}\n`; }
-            if (dList.length) { dLines.push(--i === -1 ? `<div>${badge}${dList.join(',')}</div>` : `<div>${badge}${dList.join(',')}</div>`); rawD += `${i+2}-${rawDList.join(',')}\n`; }
+            if (mList.length) mLines.push(`<div>${badge}${mList.join(',')}</div>`);
+            if (dList.length) dLines.push(`<div>${badge}${dList.join(',')}</div>`);
+            
+            if (rawMList.length) rawM += `${i+1}-${rawMList.join(',')}\n`;
+            if (rawDList.length) rawD += `${i+1}-${rawDList.join(',')}\n`;
         });
         return { mHtml: mLines.join(''), dHtml: dLines.join(''), rawM, rawD };
     }
@@ -217,6 +241,7 @@
     }
 
     async function showModal(activeTab = 'view') {
+        currentActiveTab = activeTab;
         const myId = getOrCreateUserID();
         try {
             const myRemoteData = await fetchPlayerData(myId);
@@ -270,16 +295,16 @@
                         <button id="btn-sync-cloud" style="background:#27ae60; color:white; border:none; padding:10px 15px; border-radius:5px; cursor:pointer; font-weight:bold;">☁️ Partager mon Album</button>
                     </div>
                     <div style="margin-bottom:15px; display:flex; align-items:center; gap:10px; font-size:0.85rem;">
-                        <input type="checkbox" id="toggle-gold" ${showGolds ? 'checked' : ''}> <label for="toggle-gold">Afficher les Ors [Golds] (Manquantes & Doubles)</label>
+                        <input type="checkbox" id="toggle-gold-view" class="toggle-gold-cb" ${showGolds ? 'checked' : ''}> <label for="toggle-gold-view">Afficher les Ors [Golds]</label>
                     </div>
                     <div style="display:flex; flex-wrap:wrap; gap:20px;">
                         <div style="flex:1; min-width:300px;">
                             <div style="display:flex; justify-content:space-between; border-bottom:2px solid #ffebeb; margin-bottom:10px;"><h3 style="color:#e44d26; font-size:0.9rem;">❌ MANQUANTES</h3><button id="copy-m" style="background:#666; color:white; border:none; padding:3px 8px; font-size:0.7rem; border-radius:3px; cursor:pointer;">Copier</button></div>
-                            <div style="font-family:monospace; font-size:0.85rem;">${data.mHtml || "Aucune"}</div>
+                            <div id="my-missing-container" style="font-family:monospace; font-size:0.85rem;">${data.mHtml || "Aucune"}</div>
                         </div>
                         <div style="flex:1; min-width:300px; border-left:1px solid #eee; padding-left:10px;">
                             <div style="display:flex; justify-content:space-between; border-bottom:2px solid #e8f5e9; margin-bottom:10px;"><h3 style="color:#27ae60; font-size:0.9rem;">✅ DOUBLES</h3><button id="copy-d" style="background:#666; color:white; border:none; padding:3px 8px; font-size:0.7rem; border-radius:3px; cursor:pointer;">Copier</button></div>
-                            <div style="font-family:monospace; font-size:0.85rem;">${data.dHtml || "Aucune"}</div>
+                            <div id="my-doubles-container" style="font-family:monospace; font-size:0.85rem;">${data.dHtml || "Aucune"}</div>
                         </div>
                     </div>
                 </div>
@@ -293,7 +318,7 @@
                                 ${friendsOptions}
                             </select>
                             <input type="text" id="friend-id-input" placeholder="ID de l'ami..." style="flex:1; min-width:150px; padding:10px; border-radius:8px; border:1px solid #ddd;">
-                            <input type="text" id="friend-alias-input" placeholder="Surnom (ex: Papa)..." style="width:150px; padding:10px; border-radius:8px; border:1px solid #ddd;">
+                            <input type="text" id="friend-alias-input" placeholder="Surnom (max 20car, remplace espace)..." style="width:220px; padding:10px; border-radius:8px; border:1px solid #ddd;">
                             <button id="btn-load-friend" style="padding:10px 20px; background:#4287f5; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Récupérer</button>
                             <button id="btn-save-friend" style="display:none; padding:10px; background:#f39c12; color:white; border:none; border-radius:8px; cursor:pointer; width:44px;" title="Sauvegarder / Modifier l'ami">⭐</button>
                             <button id="btn-del-friend" style="display:none; padding:10px; background:#e74c3c; color:white; border:none; border-radius:8px; cursor:pointer; width:44px;" title="Supprimer l'ami">🗑️</button>
@@ -301,15 +326,20 @@
                         <div id="friend-status" style="margin-top:8px; font-size:0.85rem; color:#666;"></div>
                     </div>
                     <div>
-                        <h4 style="margin:0 0 15px 0; color:#666;">2. Détails & Comparaison</h4>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <h4 style="margin:0; color:#666;">2. Détails & Comparaison</h4>
+                            <div style="font-size:0.85rem; display:flex; align-items:center; gap:5px;">
+                                <input type="checkbox" id="toggle-gold-compare" class="toggle-gold-cb" ${showGolds ? 'checked' : ''}> <label for="toggle-gold-compare">Afficher les Ors [Golds]</label>
+                            </div>
+                        </div>
                         <div style="display:flex; flex-wrap:wrap; gap:15px; margin-bottom:15px;">
                             <div style="flex:1; min-width:280px;">
                                 <label style="display:block; font-size:0.75rem; font-weight:bold; color:#e44d26; margin-bottom:5px;">SES MANQUANTES</label>
-                                <textarea id="friend-missing" style="width:100%; height:130px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;"></textarea>
+                                <textarea id="friend-missing" style="width:100%; height:100px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;"></textarea>
                             </div>
                             <div style="flex:1; min-width:280px;">
                                 <label style="display:block; font-size:0.75rem; font-weight:bold; color:#27ae60; margin-bottom:5px;">SES DOUBLES</label>
-                                <textarea id="friend-doubles" style="width:100%; height:130px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;"></textarea>
+                                <textarea id="friend-doubles" style="width:100%; height:100px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;"></textarea>
                             </div>
                         </div>
                         <button id="run-manual-compare" style="width:100%; padding:10px; background:#eee; border:1px solid #ccc; border-radius:8px; cursor:pointer; font-weight:bold; margin-bottom:10px;">Comparer manuellement</button>
@@ -321,20 +351,25 @@
                     <div style="background:#eafaf1; padding:15px; border-radius:10px; border:1px solid #d4efdf; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
                         <div>
                             <h3 style="margin:0 0 5px 0; color:#27ae60;">🔎 Qui a mes cartes manquantes ?</h3>
-                            <p style="margin:0; font-size:0.85rem; color:#555;">Le script va analyser tous vos amis favoris configurés et dresser la liste de ceux qui possèdent vos stickers manquants.</p>
+                            <p style="margin:0; font-size:0.85rem; color:#555;">Dresse la liste croisée uniquement pour les cartes trouvées chez vos amis.</p>
                         </div>
-                        <div style="display:flex; align-items:center; gap:10px; font-size:0.85rem;">
-                            <label for="filter-days">Exclure si pas mis à jour depuis :</label>
-                            <select id="filter-days" style="padding:5px; border-radius:5px; border:1px solid #ccc; background:white;">
-                                <option value="3">3 jours</option>
-                                <option value="7" selected>7 jours</option>
-                                <option value="15">15 jours</option>
-                                <option value="999">Ne pas filtrer (Tout voir)</option>
-                            </select>
+                        <div style="display:flex; align-items:center; gap:15px; font-size:0.85rem; flex-wrap:wrap;">
+                            <div style="display:flex; align-items:center; gap:5px; font-weight:bold;">
+                                <input type="checkbox" id="toggle-gold-global" class="toggle-gold-cb" ${showGolds ? 'checked' : ''}> <label for="toggle-gold-global">Afficher les Ors [Golds]</label>
+                            </div>
+                            <div>
+                                <label for="filter-days">Actifs depuis :</label>
+                                <select id="filter-days" style="padding:5px; border-radius:5px; border:1px solid #ccc; background:white;">
+                                    <option value="3">3 jours</option>
+                                    <option value="7" selected>7 jours</option>
+                                    <option value="15">15 jours</option>
+                                    <option value="999">Tout voir</option>
+                                </select>
+                            </div>
                             <button id="btn-run-global" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; box-shadow:0 4px 10px rgba(39,174,96,0.3);">Lancer la Recherche</button>
                         </div>
                     </div>
-                    <div id="global-loading" style="display:none; text-align:center; padding:20px; font-weight:bold; color:#666;">⌛ Analyse en cours des albums de vos amis... <span id="global-progress">0/0</span></div>
+                    <div id="global-loading" style="display:none; text-align:center; padding:20px; font-weight:bold; color:#666;">⌛ Analyse en cours... <span id="global-progress">0/0</span></div>
                     <div id="global-results-container" style="display:grid; grid-template-columns: 1fr; gap:15px;">
                         <p style="color:#888; font-style:italic; text-align:center; padding:20px;">Cliquez sur le bouton ci-dessus pour lancer la recherche globale.</p>
                     </div>
@@ -343,7 +378,7 @@
 
         document.body.appendChild(overlay);
 
-        // --- Logique UI & Événements ---
+        // --- Références UI Elements ---
         const fInput = document.getElementById('friend-id-input');
         const fAlias = document.getElementById('friend-alias-input');
         const fSelect = document.getElementById('friend-select');
@@ -351,14 +386,23 @@
         const btnSave = document.getElementById('btn-save-friend');
         const btnDel = document.getElementById('btn-del-friend');
 
+        // Remplacement automatique des espaces par un "_" et nettoyage en temps réel
+        fAlias.oninput = function() {
+            let val = fAlias.value;
+            val = val.replace(/\s+/g, '_'); // Remplacement automatique des espaces
+            val = val.replace(/[^a-zA-Z0-9À-ÿ_\-.,@]/g, '');
+            if (val.length > 20) val = val.substring(0, 20);
+            fAlias.value = val;
+        };
+
         const updateFavButtons = (id) => {
             const favs = getLocalFavsObj();
             const upperID = id.trim().toUpperCase();
             if (!upperID) { btnSave.style.display = 'none'; btnDel.style.display = 'none'; return; }
             const exists = upperID in favs;
-            btnSave.style.display = 'block'; // Toujours dispo pour mettre à jour l'alias
+            btnSave.style.display = 'block';
             btnSave.innerHTML = exists ? "💾" : "⭐";
-            btnSave.title = exists ? "Enregistrer les modifications du surnom" : "Ajouter aux favoris";
+            btnSave.title = exists ? "Modifier l'alias" : "Ajouter aux favoris";
             btnDel.style.display = exists ? 'block' : 'none';
         };
 
@@ -377,14 +421,15 @@
             const fMissing = parseFriendData(fMissingRaw), fDoubles = parseFriendData(fDoublesRaw);
             const resultsDiv = document.getElementById('compare-results');
             let canGet = "", canGive = "";
+            
             albumData.Sets.forEach((set, i) => {
                 let setNum = i + 1, getList = [], giveList = [];
                 set.Stickers.forEach(s => {
                     let id = s.StickerId.split('.').pop();
                     let isGold = [9,10,11].includes(s.Rarity);
-                    if (isGold && !showGolds) return;
+                    if (isGold && !showGolds) return; 
+                    
                     const displayId = isGold ? `<span style="color:#d4af37;font-weight:bold;">[${id}]</span>` : id;
-
                     if (s.OwnedCount === 0 && fDoubles[setNum]?.includes(id)) getList.push(displayId);
                     if (s.OwnedCount > 1 && fMissing[setNum]?.includes(id)) giveList.push(displayId);
                 });
@@ -392,121 +437,17 @@
                 if (getList.length) canGet += `<div>${badge}${getList.join(',')}</div>`;
                 if (giveList.length) canGive += `<div>${badge}${giveList.join(',')}</div>`;
             });
-            resultsDiv.innerHTML = `<div style="flex:1; min-width:250px; background:#e8f5e9; padding:15px; border-radius:10px; border:1px solid #c8e6c9;"><h4 style="margin:0 0 10px 0; color:#2e7d32;">🎁 Recevables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGet || "Aucun"}</div></div><div style="flex:1; min-width:250px; background:#fff3e0; padding:15px; border-radius:10px; border:1px solid #ef6c00;"><h4 style="margin:0 0 10px 0; color:#ef6c00;">🤝 Donnables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGive || "Aucun"}</div></div>`;
+            resultsDiv.innerHTML = `
+                <div style="flex:1; min-width:250px; background:#e8f5e9; padding:15px; border-radius:10px; border:1px solid #c8e6c9;"><h4 style="margin:0 0 10px 0; color:#2e7d32;">🎁 Recevables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGet || "Aucun"}</div></div>
+                <div style="flex:1; min-width:250px; background:#fff3e0; padding:15px; border-radius:10px; border:1px solid #ef6c00;"><h4 style="margin:0 0 10px 0; color:#ef6c00;">🤝 Donnables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGive || "Aucun"}</div></div>`;
         };
 
-        // --- Événements Onglet 1 & 2 ---
-        document.getElementById('copy-my-id').onclick = (e) => copyToClip(myId, e.target);
-        document.getElementById('import-my-id').onclick = () => {
-            const newId = prompt("Collez l'ID à importer :", myId);
-            if (newId && newId.trim() !== "") {
-                localStorage.setItem('mgo_user_id', newId.trim().toUpperCase());
-                showModal('view');
-            }
-        };
-
-        document.getElementById('btn-sync-cloud').onclick = async (e) => {
-            const btn = e.target; btn.innerHTML = "⌛ Synchro..."; btn.disabled = true;
-            try { await syncToCloud(data); btn.innerHTML = "✅ Synchro & Favoris OK !"; btn.style.background = "#27ae60"; }
-            catch (err) { btn.innerHTML = "❌ Erreur"; btn.style.background = "#e44d26"; }
-            setTimeout(() => { btn.innerHTML = "☁️ Partager mon Album"; btn.disabled = false; btn.style.background = "#27ae60"; }, 3000);
-        };
-
-        fSelect.onchange = () => { 
-            const id = fSelect.value;
-            fInput.value = id; 
-            fAlias.value = favsObj[id] || "";
-            updateFavButtons(id); 
-        };
-        fInput.oninput = () => { fAlias.value = favsObj[fInput.value.trim().toUpperCase()] || ""; updateFavButtons(fInput.value); };
-
-        btnLoad.onclick = async () => {
-            const id = fInput.value.trim(); if (!id) return;
-            btnLoad.innerHTML = "⌛...";
-            try {
-                const friendData = await fetchPlayerData(id);
-                document.getElementById('friend-missing').value = friendData.missing_text;
-                document.getElementById('friend-doubles').value = friendData.doubles_text;
-                document.getElementById('friend-status').innerHTML = `📅 Mise à jour : <b>${formatDate(friendData.updated_at)}</b>`;
-                runCompareLogic(friendData.missing_text, friendData.doubles_text);
-                btnLoad.style.background = "#27ae60"; btnLoad.innerHTML = "✅";
-                setTimeout(() => { btnLoad.style.background = "#4287f5"; btnLoad.innerHTML = "Récupérer"; }, 1500);
-                updateFavButtons(id);
-            } catch (err) { alert(err); btnLoad.innerHTML = "Récupérer"; }
-        };
-
-        btnSave.onclick = async () => {
-            const id = fInput.value.trim().toUpperCase();
-            const alias = fAlias.value.trim();
-            if (!id) return;
-            let currentFavs = getLocalFavsObj();
-            currentFavs[id] = alias;
-            saveLocalFavsObj(currentFavs);
-            try { await syncToCloud(data); showModal('comp'); } catch(e) { alert("Erreur cloud"); }
-        };
-
-        btnDel.onclick = async () => {
-            const id = fInput.value.trim().toUpperCase();
-            if (confirm(`Supprimer ${id} de vos amis ?`)) {
-                let currentFavs = getLocalFavsObj();
-                delete currentFavs[id];
-                saveLocalFavsObj(currentFavs);
-                try { await syncToCloud(data); showModal('comp'); } catch(e) { alert("Erreur cloud"); }
-            }
-        };
-
-        // --- LOGIQUE DE RECHERCHE GLOBALE (ONGLET 3) ---
-        document.getElementById('btn-run-global').onclick = async () => {
-            const currentFavs = getLocalFavsObj();
-            const friendIds = Object.keys(currentFavs);
-            const maxDays = parseInt(document.getElementById('filter-days').value);
+        const renderGlobalUI = () => {
             const resultsContainer = document.getElementById('global-results-container');
-            const loadingDiv = document.getElementById('global-loading');
-            const progressSpan = document.getElementById('global-progress');
+            if (!lastGlobalResultsData || lastGlobalResultsData.length === 0) return;
 
-            if (friendIds.length === 0) {
-                resultsContainer.innerHTML = `<p style="color:#e44d26; text-align:center; padding:20px; font-weight:bold;">❌ Vous n'avez aucun ami enregistré dans vos favoris.</p>`;
-                return;
-            }
-
-            resultsContainer.innerHTML = "";
-            loadingDiv.style.display = "block";
-            
-            let loadedFriendsData = [];
-            let processedCount = 0;
-            progressSpan.textContent = `0/${friendIds.length}`;
-
-            // Récupération asynchrone en parallèle de toutes les fiches amis
-            const promises = friendIds.map(async (id) => {
-                try {
-                    const fData = await fetchPlayerData(id);
-                    processedCount++;
-                    progressSpan.textContent = `${processedCount}/${friendIds.length}`;
-                    
-                    // Vérification du filtre de date
-                    const days = daysBetween(fData.updated_at, new Date().toISOString());
-                    if (days <= maxDays) {
-                        loadedFriendsData.push({
-                            id: id,
-                            alias: currentFavs[id] || "Sans nom",
-                            missing: parseFriendData(fData.missing_text),
-                            doubles: parseFriendData(fData.doubles_text),
-                            updatedAt: fData.updated_at,
-                            daysAgo: days
-                        });
-                    }
-                } catch(e) {
-                    processedCount++;
-                    progressSpan.textContent = `${processedCount}/${friendIds.length}`;
-                }
-            });
-
-            await Promise.all(promises);
-            loadingDiv.style.display = "none";
-
-            // Calcul de la recherche inversée : Cartes manquantes de l'utilisateur vs Doubles des amis
             let globalHtml = [];
-            let totalFoundMissing = 0;
+            let totalCorrelations = 0;
 
             albumData.Sets.forEach((set, i) => {
                 let setNum = i + 1;
@@ -515,24 +456,20 @@
                 set.Stickers.forEach(s => {
                     let id = s.StickerId.split('.').pop();
                     let isGold = [9,10,11].includes(s.Rarity);
-                    if (isGold && !showGolds) return;
+                    if (isGold && !showGolds) return; 
 
-                    // Si la carte est manquante chez moi
                     if (s.OwnedCount === 0) {
-                        totalFoundMissing++;
-                        // Chercher qui l'a en double
                         let providers = [];
-                        loadedFriendsData.forEach(friend => {
-                            if (friend.doubles[setNum]?.includes(id)) {
-                                providers.push(`<b style="color:#27ae60;" title="Mis à jour il y a ${friend.daysAgo}j">${friend.alias}</b>`);
+                        lastGlobalResultsData.forEach(friend => {
+                            if (friend.doubles[setNum] && friend.doubles[setNum].includes(id)) {
+                                providers.push(`<b style="color:#27ae60;">${friend.alias}</b>`);
                             }
                         });
 
-                        const displayId = isGold ? `<span style="color:#d4af37;font-weight:bold;">[${id}]</span>` : `<b>${id}</b>`;
                         if (providers.length > 0) {
+                            totalCorrelations++;
+                            const displayId = isGold ? `<span style="color:#d4af37;font-weight:bold;">[${id}]</span>` : `<b>${id}</b>`;
                             setHtmlMatches.push(`<div style="padding:6px 0; border-bottom:1px dashed #eee; font-size:0.85rem;">Sticker ${displayId} disponible chez : ${providers.join(', ')}</div>`);
-                        } else {
-                            setHtmlMatches.push(`<div style="padding:6px 0; border-bottom:1px dashed #eee; font-size:0.85rem; color:#999;">Sticker ${displayId} : <i>Personne ne l'a en double</i></div>`);
                         }
                     }
                 });
@@ -547,25 +484,137 @@
                 }
             });
 
-            if (totalFoundMissing === 0) {
-                resultsContainer.innerHTML = `<p style="color:#27ae60; text-align:center; padding:20px; font-weight:bold;">🎉 Félicitations ! Vous n'avez aucune carte manquante (ou filtres golds désactivés).</p>`;
+            if (totalCorrelations === 0) {
+                resultsContainer.innerHTML = `<p style="color:#999; text-align:center; padding:20px; font-style:italic;">Aucune corrélation trouvée (aucun de vos amis actifs n'a de double pour vos cartes manquantes).</p>`;
             } else {
                 resultsContainer.innerHTML = `
                     <div style="margin-bottom:10px; font-size:0.9rem; color:#666;">
-                        Analyse basée sur <b>${loadedFriendsData.length}</b> ami(s) actif(s) (mis à jour dans les ${maxDays === 999 ? 'tous' : maxDays} derniers jours).
+                        Affichage de <b>${totalCorrelations}</b> correspondance(s) directe(s).
                     </div>
                     <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:15px;">
                         ${globalHtml.join('')}
-                    </div>
-                `;
+                    </div>`;
             }
         };
+
+        // --- Événements Clicks ---
+        document.getElementById('copy-my-id').onclick = (e) => copyToClip(myId, e.target);
+        document.getElementById('import-my-id').onclick = () => {
+            const newId = prompt("Collez l'ID à importer :", myId);
+            if (newId && newId.trim() !== "") {
+                localStorage.setItem('mgo_user_id', newId.trim().toUpperCase());
+                showModal('view');
+            }
+        };
+
+        document.getElementById('btn-sync-cloud').onclick = async (e) => {
+            const btn = e.target; btn.innerHTML = "...⌛..."; btn.disabled = true;
+            try { await syncToCloud(data); btn.innerHTML = "✅ Partagé !"; }
+            catch (err) { btn.innerHTML = "❌ Erreur"; }
+            setTimeout(() => { btn.innerHTML = "☁️ Partager mon Album"; btn.disabled = false; }, 2500);
+        };
+
+        fSelect.onchange = () => { 
+            const id = fSelect.value; fInput.value = id; 
+            fAlias.value = favsObj[id] || ""; updateFavButtons(id); 
+        };
+        fInput.oninput = () => { fAlias.value = favsObj[fInput.value.trim().toUpperCase()] || ""; updateFavButtons(fInput.value); };
+
+        btnLoad.onclick = async () => {
+            const id = fInput.value.trim(); if (!id) return;
+            btnLoad.innerHTML = "⌛...";
+            try {
+                const friendData = await fetchPlayerData(id);
+                lastLoadedFriendData = friendData; 
+                document.getElementById('friend-missing').value = friendData.missing_text;
+                document.getElementById('friend-doubles').value = friendData.doubles_text;
+                document.getElementById('friend-status').innerHTML = `📅 Mis à jour : <b>${formatDate(friendData.updated_at)}</b>`;
+                runCompareLogic(friendData.missing_text, friendData.doubles_text);
+                btnLoad.innerHTML = "Récupérer"; updateFavButtons(id);
+            } catch (err) { alert(err); btnLoad.innerHTML = "Récupérer"; }
+        };
+
+        btnSave.onclick = async () => {
+            const id = fInput.value.trim().toUpperCase(); if (!id) return;
+            let currentFavs = getLocalFavsObj();
+            currentFavs[id] = fAlias.value.trim();
+            saveLocalFavsObj(currentFavs);
+            try { await syncToCloud(data); showModal('comp'); } catch(e) { alert("Erreur Cloud"); }
+        };
+
+        btnDel.onclick = async () => {
+            const id = fInput.value.trim().toUpperCase();
+            if (confirm(`Supprimer ${id} des favoris ?`)) {
+                let currentFavs = getLocalFavsObj(); delete currentFavs[id];
+                saveLocalFavsObj(currentFavs);
+                try { await syncToCloud(data); showModal('comp'); } catch(e) { alert("Erreur Cloud"); }
+            }
+        };
+
+        document.getElementById('btn-run-global').onclick = async () => {
+            const currentFavs = getLocalFavsObj();
+            const friendIds = Object.keys(currentFavs);
+            const maxDays = parseInt(document.getElementById('filter-days').value);
+            const resultsContainer = document.getElementById('global-results-container');
+            const loadingDiv = document.getElementById('global-loading');
+            const progressSpan = document.getElementById('global-progress');
+
+            if (friendIds.length === 0) {
+                resultsContainer.innerHTML = `<p style="color:#e44d26; text-align:center; padding:20px; font-weight:bold;">❌ Aucun ami enregistré en favori.</p>`;
+                return;
+            }
+
+            resultsContainer.innerHTML = ""; loadingDiv.style.display = "block";
+            lastGlobalResultsData = [];
+            let processedCount = 0; progressSpan.textContent = `0/${friendIds.length}`;
+
+            const promises = friendIds.map(async (id) => {
+                try {
+                    const fData = await fetchPlayerData(id);
+                    processedCount++; progressSpan.textContent = `${processedCount}/${friendIds.length}`;
+                    
+                    const days = daysBetween(fData.updated_at, new Date().toISOString());
+                    if (days <= maxDays) {
+                        lastGlobalResultsData.push({
+                            id: id,
+                            alias: currentFavs[id] || id, 
+                            missing: parseFriendData(fData.missing_text),
+                            doubles: parseFriendData(fData.doubles_text)
+                        });
+                    }
+                } catch(e) {
+                    processedCount++; progressSpan.textContent = `${processedCount}/${friendIds.length}`;
+                }
+            });
+
+            await Promise.all(promises);
+            loadingDiv.style.display = "none";
+            renderGlobalUI();
+        };
+
+        document.querySelectorAll('.toggle-gold-cb').forEach(cb => {
+            cb.onchange = (e) => {
+                showGolds = e.target.checked;
+                document.querySelectorAll('.toggle-gold-cb').forEach(box => box.checked = showGolds);
+                
+                if (currentActiveTab === 'view') {
+                    const freshData = generateContent();
+                    document.getElementById('my-missing-container').innerHTML = freshData.mHtml || "Aucune";
+                    document.getElementById('my-doubles-container').innerHTML = freshData.dHtml || "Aucune";
+                } 
+                else if (currentActiveTab === 'comp' && lastLoadedFriendData) {
+                    runCompareLogic(lastLoadedFriendData.missing_text, lastLoadedFriendData.doubles_text);
+                } 
+                else if (currentActiveTab === 'global' && lastGlobalResultsData) {
+                    renderGlobalUI();
+                }
+            };
+        });
 
         document.getElementById('tab-view').onclick = () => showModal('view');
         document.getElementById('tab-compare').onclick = () => showModal('comp');
         document.getElementById('tab-search-global').onclick = () => showModal('global');
         document.getElementById('close-modal').onclick = () => overlay.remove();
-        document.getElementById('toggle-gold').onchange = (e) => { showGolds = e.target.checked; showModal(activeTab); };
         document.getElementById('run-manual-compare').onclick = () => runCompareLogic(document.getElementById('friend-missing').value, document.getElementById('friend-doubles').value);
         document.getElementById('copy-m').onclick = (e) => copyToClip("❌ MANQUANTES :\n" + data.rawM, e.target);
         document.getElementById('copy-d').onclick = (e) => copyToClip("✅ DOUBLES :\n" + data.rawD, e.target);
