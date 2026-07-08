@@ -5,7 +5,7 @@
 // @grant         GM_xmlhttpRequest
 // @connect       firestore.googleapis.com
 // @version       1.95
-// @author        Droopygoon
+// @author        Droopygoon1
 // @downloadURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // @updateURL     https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // ==/UserScript==
