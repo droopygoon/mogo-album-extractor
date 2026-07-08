@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         Monopoly Go - Album Extractor
-// @namespace    UserScripts
+// @name          Monopoly Go - Album Extractor
+// @namespace     UserScripts
 // @match         https://*.monopolygo.com/*
 // @grant         GM_xmlhttpRequest
 // @connect       zopkkmdbmvypptbumnta.supabase.co
-// @version      1.90
-// @author        Droopygoon & Emmanuel
+// @version       1.91
+// @author        Droopygoon
 // @downloadURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // @updateURL     https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // ==/UserScript==
@@ -13,7 +13,7 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.90";
+    const CURRENT_VERSION = "1.91";
     const SB_RPC_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/rpc/sync_player_data";
     const SB_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/players_data";
     const SB_KEY = "sb_publishable_E5_01nYHlSHOuywiICnbTQ_lKk1wN0i";
@@ -25,7 +25,7 @@
     function checkUpdateNotification() {
         const lastVersion = localStorage.getItem('mgo_extractor_version');
         if (lastVersion && lastVersion !== CURRENT_VERSION) {
-            showUpdateToast(`🚀 v${CURRENT_VERSION} : Les Ors (Golds) sont maintenant visibles dans les Doubles !`);
+            showUpdateToast(`🚀 v${CURRENT_VERSION} : Les Ors (Golds) sont maintenant pris en compte dans la comparaison si l'option est cochée !`);
         }
         localStorage.setItem('mgo_extractor_version', CURRENT_VERSION);
     }
@@ -291,15 +291,21 @@
                 let setNum = i + 1, getList = [], giveList = [];
                 set.Stickers.forEach(s => {
                     let id = s.StickerId.split('.').pop();
-                    if ([9,10,11].includes(s.Rarity)) return;
-                    if (s.OwnedCount === 0 && fDoubles[setNum]?.includes(id)) getList.push(id);
-                    if (s.OwnedCount > 1 && fMissing[setNum]?.includes(id)) giveList.push(id);
+                    let isGold = [9,10,11].includes(s.Rarity);
+                    
+                    // Si c'est une carte Or et que l'affichage des Ors est désactivé, on l'ignore
+                    if (isGold && !showGolds) return;
+
+                    const displayId = isGold ? `<span style="color:#d4af37;font-weight:bold;">[${id}]</span>` : id;
+
+                    if (s.OwnedCount === 0 && fDoubles[setNum]?.includes(id)) getList.push(displayId);
+                    if (s.OwnedCount > 1 && fMissing[setNum]?.includes(id)) giveList.push(displayId);
                 });
                 const badge = `<span style="font-weight:bold; color:#4287f5;">${setNum}-</span>`;
                 if (getList.length) canGet += `<div>${badge}${getList.join(',')}</div>`;
                 if (giveList.length) canGive += `<div>${badge}${giveList.join(',')}</div>`;
             });
-            resultsDiv.innerHTML = `<div style="flex:1; min-width:250px; background:#e8f5e9; padding:15px; border-radius:10px; border:1px solid #c8e6c9;"><h4 style="margin:0 0 10px 0; color:#2e7d32;">🎁 Reçevables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGet || "Aucun"}</div></div><div style="flex:1; min-width:250px; background:#fff3e0; padding:15px; border-radius:10px; border:1px solid #ef6c00;"><h4 style="margin:0 0 10px 0; color:#ef6c00;">🤝 Donnables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGive || "Aucun"}</div></div>`;
+            resultsDiv.innerHTML = `<div style="flex:1; min-width:250px; background:#e8f5e9; padding:15px; border-radius:10px; border:1px solid #c8e6c9;"><h4 style="margin:0 0 10px 0; color:#2e7d32;">🎁 Recevables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGet || "Aucun"}</div></div><div style="flex:1; min-width:250px; background:#fff3e0; padding:15px; border-radius:10px; border:1px solid #ef6c00;"><h4 style="margin:0 0 10px 0; color:#ef6c00;">🤝 Donnables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGive || "Aucun"}</div></div>`;
         };
 
         // --- Evenements ---
