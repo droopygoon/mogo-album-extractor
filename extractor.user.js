@@ -3,8 +3,8 @@
 // @namespace     UserScripts
 // @match         https://*.monopolygo.com/*
 // @grant         GM_xmlhttpRequest
-// @connect       zopkkmdbmvypptbumnta.supabase.co
-// @version       1.91
+// @connect       firestore.googleapis.com
+// @version       1.92
 // @author        Droopygoon
 // @downloadURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // @updateURL     https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
@@ -13,10 +13,11 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.91";
-    const SB_RPC_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/rpc/sync_player_data";
-    const SB_URL = "https://zopkkmdbmvypptbumnta.supabase.co/rest/v1/players_data";
-    const SB_KEY = "sb_publishable_E5_01nYHlSHOuywiICnbTQ_lKk1wN0i";
+    const CURRENT_VERSION = "1.92";
+    
+    // --- CONFIGURATION FIREBASE ---
+    const FIREBASE_PROJECT_ID = "mogo-album-extractor"; 
+    const FB_BASE_URL = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/players_data`;
 
     let albumData = null;
     let showGolds = true;
@@ -25,7 +26,7 @@
     function checkUpdateNotification() {
         const lastVersion = localStorage.getItem('mgo_extractor_version');
         if (lastVersion && lastVersion !== CURRENT_VERSION) {
-            showUpdateToast(`🚀 v${CURRENT_VERSION} : Les Ors (Golds) sont maintenant pris en compte dans la comparaison si l'option est cochée !`);
+            showUpdateToast(`🚀 v${CURRENT_VERSION} : Migration vers Firebase effectuée pour une stabilité maximale !`);
         }
         localStorage.setItem('mgo_extractor_version', CURRENT_VERSION);
     }
@@ -68,22 +69,28 @@
         return d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     }
 
-    // --- Communications Cloud ---
+    // --- Communications Cloud (Firebase Firestore API REST) ---
     async function syncToCloud(data) {
         const userId = getOrCreateUserID();
         const favs = getLocalFavs();
+        
+        const payload = {
+            fields: {
+                user_id: { stringValue: userId },
+                missing_text: { stringValue: data.rawM },
+                doubles_text: { stringValue: data.rawD },
+                friends_list: { arrayValue: { values: favs.map(f => ({ stringValue: f })) } },
+                updated_at: { stringValue: new Date().toISOString() }
+            }
+        };
+
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
-                method: "POST",
-                url: SB_RPC_URL,
-                headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}`, "Content-Type": "application/json" },
-                data: JSON.stringify({
-                    p_user_id: userId,
-                    p_missing: data.rawM,
-                    p_doubles: data.rawD,
-                    p_friends: favs
-                }),
-                onload: (res) => (res.status >= 200 && res.status < 300) ? resolve(true) : reject(`Erreur RPC ${res.status}`),
+                method: "PATCH", 
+                url: `${FB_BASE_URL}/${userId}`,
+                headers: { "Content-Type": "application/json" },
+                data: JSON.stringify(payload),
+                onload: (res) => (res.status >= 200 && res.status < 300) ? resolve(true) : reject(`Erreur Firebase ${res.status}`),
                 onerror: () => reject("Erreur Réseau")
             });
         });
@@ -93,13 +100,28 @@
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "GET",
-                url: `${SB_URL}?user_id=eq.${targetId.toUpperCase()}`,
-                headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}` },
+                url: `${FB_BASE_URL}/${targetId.toUpperCase()}`,
+                headers: { "Content-Type": "application/json" },
                 onload: (res) => {
+                    if (res.status === 404) {
+                        reject("ID introuvable");
+                        return;
+                    }
                     try {
                         const result = JSON.parse(res.responseText);
-                        if (result.length > 0) resolve(result[0]);
-                        else reject("ID introuvable");
+                        const fields = result.fields;
+                        if (fields) {
+                            const formattedData = {
+                                user_id: fields.user_id?.stringValue || targetId,
+                                missing_text: fields.missing_text?.stringValue || "",
+                                doubles_text: fields.doubles_text?.stringValue || "",
+                                updated_at: fields.updated_at?.stringValue || "",
+                                friends_list: fields.friends_list?.arrayValue?.values?.map(v => v.stringValue) || []
+                            };
+                            resolve(formattedData);
+                        } else {
+                            reject("Données vides");
+                        }
                     } catch(e) { reject("Données invalides"); }
                 },
                 onerror: () => reject("Erreur Réseau")
@@ -143,12 +165,10 @@
                 let id = s.StickerId.split('.').pop();
                 let isGold = [9,10,11].includes(s.Rarity);
 
-                // Logique Manquantes
                 if (s.OwnedCount === 0) {
                     if (!isGold) { mList.push(id); rawMList.push(id); }
                     else if (showGolds) { mList.push(`<span style="color:#d4af37;font-weight:bold;">[${id}]</span>`); rawMList.push(`[${id}]`); }
                 }
-                // Logique Doubles
                 else if (s.OwnedCount > 1) {
                     if (!isGold) { dList.push(id); rawDList.push(id); }
                     else if (showGolds) { dList.push(`<span style="color:#d4af37;font-weight:bold;">[${id}]</span>`); rawDList.push(`[${id}]`); }
@@ -293,7 +313,6 @@
                     let id = s.StickerId.split('.').pop();
                     let isGold = [9,10,11].includes(s.Rarity);
                     
-                    // Si c'est une carte Or et que l'affichage des Ors est désactivé, on l'ignore
                     if (isGold && !showGolds) return;
 
                     const displayId = isGold ? `<span style="color:#d4af37;font-weight:bold;">[${id}]</span>` : id;
