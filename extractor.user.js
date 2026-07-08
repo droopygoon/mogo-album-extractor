@@ -4,7 +4,7 @@
 // @match         https://*.monopolygo.com/*
 // @grant         GM_xmlhttpRequest
 // @connect       firestore.googleapis.com
-// @version       1.92
+// @version       1.93
 // @author        Droopygoon
 // @downloadURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // @updateURL     https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
@@ -13,7 +13,7 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.92";
+    const CURRENT_VERSION = "1.93";
     
     // --- CONFIGURATION FIREBASE ---
     const FIREBASE_PROJECT_ID = "mogo-album-extractor"; 
@@ -26,7 +26,7 @@
     function checkUpdateNotification() {
         const lastVersion = localStorage.getItem('mgo_extractor_version');
         if (lastVersion && lastVersion !== CURRENT_VERSION) {
-            showUpdateToast(`🚀 v${CURRENT_VERSION} : Migration vers Firebase effectuée pour une stabilité maximale !`);
+            showUpdateToast(`🚀 v${CURRENT_VERSION} : Ajout des alias d'amis et de la recherche globale inversée !`);
         }
         localStorage.setItem('mgo_extractor_version', CURRENT_VERSION);
     }
@@ -60,8 +60,31 @@
         return id;
     }
 
-    function getLocalFavs() { return JSON.parse(localStorage.getItem('mgo_saved_friends') || "[]"); }
-    function setLocalFavs(arr) { localStorage.setItem('mgo_saved_friends', JSON.stringify([...new Set(arr)])); }
+    // Gestion évoluée des favoris avec Alias (Format stocké en BD: "ID|ALIAS" ou simplement "ID" si pas d'alias)
+    function getLocalFavsObj() {
+        const raw = localStorage.getItem('mgo_saved_friends_v2') || localStorage.getItem('mgo_saved_friends') || "[]";
+        try {
+            const parsed = JSON.parse(raw);
+            let obj = {};
+            if (Array.isArray(parsed)) {
+                parsed.forEach(item => {
+                    if (item.includes('|')) {
+                        const [id, alias] = item.split('|');
+                        obj[id.trim().toUpperCase()] = alias.trim();
+                    } else {
+                        obj[item.trim().toUpperCase()] = "";
+                    }
+                });
+            } else { obj = parsed; }
+            return obj;
+        } catch(e) { return {}; }
+    }
+
+    function saveLocalFavsObj(obj) {
+        const arrFormat = Object.keys(obj).map(id => obj[id] ? `${id}|${obj[id]}` : id);
+        localStorage.setItem('mgo_saved_friends_v2', JSON.stringify(arrFormat));
+        localStorage.setItem('mgo_saved_friends', JSON.stringify(arrFormat)); // Rétrocompatibilité
+    }
 
     function formatDate(dateStr) {
         if (!dateStr) return "Inconnue";
@@ -69,17 +92,25 @@
         return d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     }
 
+    function daysBetween(dateStr1, dateStr2) {
+        if (!dateStr1) return 999;
+        const d1 = new Date(dateStr1);
+        const d2 = new Date(dateStr2);
+        return Math.floor(Math.abs(d1 - d2) / (1000 * 60 * 60 * 24));
+    }
+
     // --- Communications Cloud (Firebase Firestore API REST) ---
     async function syncToCloud(data) {
         const userId = getOrCreateUserID();
-        const favs = getLocalFavs();
+        const favsObj = getLocalFavsObj();
+        const arrFormat = Object.keys(favsObj).map(id => favsObj[id] ? `${id}|${favsObj[id]}` : id);
         
         const payload = {
             fields: {
                 user_id: { stringValue: userId },
                 missing_text: { stringValue: data.rawM },
                 doubles_text: { stringValue: data.rawD },
-                friends_list: { arrayValue: { values: favs.map(f => ({ stringValue: f })) } },
+                friends_list: { arrayValue: { values: arrFormat.map(f => ({ stringValue: f })) } },
                 updated_at: { stringValue: new Date().toISOString() }
             }
         };
@@ -100,28 +131,24 @@
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "GET",
-                url: `${FB_BASE_URL}/${targetId.toUpperCase()}`,
+                url: `${FB_BASE_URL}/${targetId.toUpperCase().trim()}`,
                 headers: { "Content-Type": "application/json" },
                 onload: (res) => {
-                    if (res.status === 404) {
-                        reject("ID introuvable");
-                        return;
-                    }
+                    if (res.status === 404) { reject("ID introuvable"); return; }
                     try {
                         const result = JSON.parse(res.responseText);
                         const fields = result.fields;
                         if (fields) {
+                            const rawFriends = fields.friends_list?.arrayValue?.values?.map(v => v.stringValue) || [];
                             const formattedData = {
                                 user_id: fields.user_id?.stringValue || targetId,
                                 missing_text: fields.missing_text?.stringValue || "",
                                 doubles_text: fields.doubles_text?.stringValue || "",
                                 updated_at: fields.updated_at?.stringValue || "",
-                                friends_list: fields.friends_list?.arrayValue?.values?.map(v => v.stringValue) || []
+                                friends_list: rawFriends
                             };
                             resolve(formattedData);
-                        } else {
-                            reject("Données vides");
-                        }
+                        } else { reject("Données vides"); }
                     } catch(e) { reject("Données invalides"); }
                 },
                 onerror: () => reject("Erreur Réseau")
@@ -175,8 +202,8 @@
                 }
             });
             const badge = `<span style="display:inline-block;width:25px;color:#4287f5;font-weight:bold;">${i+1}-</span>`;
-            if (mList.length) { mLines.push(`<div>${badge}${mList.join(',')}</div>`); rawM += `${i+1}-${rawMList.join(',')}\n`; }
-            if (dList.length) { dLines.push(`<div>${badge}${dList.join(',')}</div>`); rawD += `${i+1}-${rawDList.join(',')}\n`; }
+            if (mList.length) { mLines.push(--i === -1 ? `<div>${badge}${mList.join(',')}</div>` : `<div>${badge}${mList.join(',')}</div>`); rawM += `${i+2}-${rawMList.join(',')}\n`; }
+            if (dList.length) { dLines.push(--i === -1 ? `<div>${badge}${dList.join(',')}</div>` : `<div>${badge}${dList.join(',')}</div>`); rawD += `${i+2}-${rawDList.join(',')}\n`; }
         });
         return { mHtml: mLines.join(''), dHtml: dLines.join(''), rawM, rawD };
     }
@@ -193,7 +220,18 @@
         const myId = getOrCreateUserID();
         try {
             const myRemoteData = await fetchPlayerData(myId);
-            if (myRemoteData && Array.isArray(myRemoteData.friends_list)) setLocalFavs(myRemoteData.friends_list);
+            if (myRemoteData && Array.isArray(myRemoteData.friends_list)) {
+                let mergedObj = getLocalFavsObj();
+                myRemoteData.friends_list.forEach(item => {
+                    if (item.includes('|')) {
+                        const [id, alias] = item.split('|');
+                        mergedObj[id.trim().toUpperCase()] = alias.trim();
+                    } else if (!mergedObj[item.trim().toUpperCase()]) {
+                        mergedObj[item.trim().toUpperCase()] = "";
+                    }
+                });
+                saveLocalFavsObj(mergedObj);
+            }
         } catch(e) {}
 
         const existing = document.getElementById('album-modal-overlay');
@@ -204,17 +242,22 @@
         overlay.id = 'album-modal-overlay';
         overlay.setAttribute('style', 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:10000;display:flex;justify-content:center;align-items:center;backdrop-filter:blur(3px);');
 
-        const friendsOptions = getLocalFavs().map(f => `<option value="${f}">${f}</option>`).join('');
+        const favsObj = getLocalFavsObj();
+        const friendsOptions = Object.keys(favsObj).map(id => {
+            const displayName = favsObj[id] ? `${favsObj[id]} (${id})` : id;
+            return `<option value="${id}">${displayName}</option>`;
+        }).join('');
 
         overlay.innerHTML = `
-            <div style="width:900px; max-width:95%; max-height:90vh; background:#f8f9fa; border-radius:15px; overflow:hidden; display:flex; flex-direction:column; font-family:sans-serif;">
+            <div style="width:950px; max-width:95%; max-height:90vh; background:#f8f9fa; border-radius:15px; overflow:hidden; display:flex; flex-direction:column; font-family:sans-serif;">
                 <div style="padding:15px 20px; background:#4287f5; color:white; display:flex; justify-content:space-between; align-items:center;">
                     <h2 style="margin:0; font-size:1.1rem;">🐾 Album Extractor - V${CURRENT_VERSION}</h2>
                     <button id="close-modal" style="background:rgba(255,255,255,0.2); border:none; color:white; padding:5px 12px; border-radius:5px; cursor:pointer;">Fermer</button>
                 </div>
                 <div style="display:flex; background:#eee; border-bottom:1px solid #ddd;">
-                    <button id="tab-view" style="flex:1; padding:12px; border:none; background:${activeTab==='view'?'#fff':'#eee'}; cursor:pointer; font-weight:bold;">Mon Inventaire</button>
-                    <button id="tab-compare" style="flex:1; padding:12px; border:none; background:${activeTab==='comp'?'#fff':'#eee'}; cursor:pointer; font-weight:bold; border-left:1px solid #ddd;">🤝 Comparer</button>
+                    <button id="tab-view" style="flex:1; padding:12px; border:none; background:${activeTab=='view'?'#fff':'#eee'}; cursor:pointer; font-weight:bold;">Mon Inventaire</button>
+                    <button id="tab-compare" style="flex:1; padding:12px; border:none; background:${activeTab=='comp'?'#fff':'#eee'}; cursor:pointer; font-weight:bold; border-left:1px solid #ddd;">🤝 Comparer 1 à 1</button>
+                    <button id="tab-search-global" style="flex:1; padding:12px; border:none; background:${activeTab=='global'?'#fff':'#eee'}; cursor:pointer; font-weight:bold; border-left:1px solid #ddd; color:#27ae60;">🔎 Recherche Globale</button>
                 </div>
 
                 <div id="content-view" style="display:${activeTab==='view'?'block':'none'}; padding:20px; overflow-y:auto; background:#fff;">
@@ -245,14 +288,15 @@
                     <div style="margin-bottom:20px; border-bottom:1px solid #eee; padding-bottom:15px;">
                         <h4 style="margin:0 0 10px 0; color:#4287f5;">1. Charger un ami</h4>
                         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                            <select id="friend-select" style="width:180px; padding:10px; border-radius:8px; border:1px solid #ddd; background:white;">
-                                <option value="">-- Favoris --</option>
+                            <select id="friend-select" style="width:220px; padding:10px; border-radius:8px; border:1px solid #ddd; background:white;">
+                                <option value="">-- Favoris / Amis --</option>
                                 ${friendsOptions}
                             </select>
                             <input type="text" id="friend-id-input" placeholder="ID de l'ami..." style="flex:1; min-width:150px; padding:10px; border-radius:8px; border:1px solid #ddd;">
+                            <input type="text" id="friend-alias-input" placeholder="Surnom (ex: Papa)..." style="width:150px; padding:10px; border-radius:8px; border:1px solid #ddd;">
                             <button id="btn-load-friend" style="padding:10px 20px; background:#4287f5; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Récupérer</button>
-                            <button id="btn-save-friend" style="display:none; padding:10px; background:#f39c12; color:white; border:none; border-radius:8px; cursor:pointer; width:44px;">⭐</button>
-                            <button id="btn-del-friend" style="display:none; padding:10px; background:#e74c3c; color:white; border:none; border-radius:8px; cursor:pointer; width:44px;">🗑️</button>
+                            <button id="btn-save-friend" style="display:none; padding:10px; background:#f39c12; color:white; border:none; border-radius:8px; cursor:pointer; width:44px;" title="Sauvegarder / Modifier l'ami">⭐</button>
+                            <button id="btn-del-friend" style="display:none; padding:10px; background:#e74c3c; color:white; border:none; border-radius:8px; cursor:pointer; width:44px;" title="Supprimer l'ami">🗑️</button>
                         </div>
                         <div id="friend-status" style="margin-top:8px; font-size:0.85rem; color:#666;"></div>
                     </div>
@@ -261,35 +305,61 @@
                         <div style="display:flex; flex-wrap:wrap; gap:15px; margin-bottom:15px;">
                             <div style="flex:1; min-width:280px;">
                                 <label style="display:block; font-size:0.75rem; font-weight:bold; color:#e44d26; margin-bottom:5px;">SES MANQUANTES</label>
-                                <textarea id="friend-missing" style="width:100%; height:160px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;"></textarea>
+                                <textarea id="friend-missing" style="width:100%; height:130px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;"></textarea>
                             </div>
                             <div style="flex:1; min-width:280px;">
                                 <label style="display:block; font-size:0.75rem; font-weight:bold; color:#27ae60; margin-bottom:5px;">SES DOUBLES</label>
-                                <textarea id="friend-doubles" style="width:100%; height:160px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;"></textarea>
+                                <textarea id="friend-doubles" style="width:100%; height:130px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;"></textarea>
                             </div>
                         </div>
                         <button id="run-manual-compare" style="width:100%; padding:10px; background:#eee; border:1px solid #ccc; border-radius:8px; cursor:pointer; font-weight:bold; margin-bottom:10px;">Comparer manuellement</button>
                     </div>
                     <div id="compare-results" style="display:flex; flex-wrap:wrap; gap:20px; border-top:2px solid #f0f0f0; padding-top:20px;"></div>
                 </div>
+
+                <div id="content-global" style="display:${activeTab==='global'?'block':'none'}; padding:20px; overflow-y:auto; background:#fff;">
+                    <div style="background:#eafaf1; padding:15px; border-radius:10px; border:1px solid #d4efdf; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
+                        <div>
+                            <h3 style="margin:0 0 5px 0; color:#27ae60;">🔎 Qui a mes cartes manquantes ?</h3>
+                            <p style="margin:0; font-size:0.85rem; color:#555;">Le script va analyser tous vos amis favoris configurés et dresser la liste de ceux qui possèdent vos stickers manquants.</p>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:10px; font-size:0.85rem;">
+                            <label for="filter-days">Exclure si pas mis à jour depuis :</label>
+                            <select id="filter-days" style="padding:5px; border-radius:5px; border:1px solid #ccc; background:white;">
+                                <option value="3">3 jours</option>
+                                <option value="7" selected>7 jours</option>
+                                <option value="15">15 jours</option>
+                                <option value="999">Ne pas filtrer (Tout voir)</option>
+                            </select>
+                            <button id="btn-run-global" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; box-shadow:0 4px 10px rgba(39,174,96,0.3);">Lancer la Recherche</button>
+                        </div>
+                    </div>
+                    <div id="global-loading" style="display:none; text-align:center; padding:20px; font-weight:bold; color:#666;">⌛ Analyse en cours des albums de vos amis... <span id="global-progress">0/0</span></div>
+                    <div id="global-results-container" style="display:grid; grid-template-columns: 1fr; gap:15px;">
+                        <p style="color:#888; font-style:italic; text-align:center; padding:20px;">Cliquez sur le bouton ci-dessus pour lancer la recherche globale.</p>
+                    </div>
+                </div>
             </div>`;
 
         document.body.appendChild(overlay);
 
-        // --- Logique UI ---
+        // --- Logique UI & Événements ---
         const fInput = document.getElementById('friend-id-input');
+        const fAlias = document.getElementById('friend-alias-input');
         const fSelect = document.getElementById('friend-select');
         const btnLoad = document.getElementById('btn-load-friend');
         const btnSave = document.getElementById('btn-save-friend');
         const btnDel = document.getElementById('btn-del-friend');
 
         const updateFavButtons = (id) => {
-            const favs = getLocalFavs();
+            const favs = getLocalFavsObj();
             const upperID = id.trim().toUpperCase();
             if (!upperID) { btnSave.style.display = 'none'; btnDel.style.display = 'none'; return; }
-            const isFav = favs.includes(upperID);
-            btnSave.style.display = isFav ? 'none' : 'block';
-            btnDel.style.display = isFav ? 'block' : 'none';
+            const exists = upperID in favs;
+            btnSave.style.display = 'block'; // Toujours dispo pour mettre à jour l'alias
+            btnSave.innerHTML = exists ? "💾" : "⭐";
+            btnSave.title = exists ? "Enregistrer les modifications du surnom" : "Ajouter aux favoris";
+            btnDel.style.display = exists ? 'block' : 'none';
         };
 
         const copyToClip = (text, btn, msg = "Copié !") => {
@@ -312,9 +382,7 @@
                 set.Stickers.forEach(s => {
                     let id = s.StickerId.split('.').pop();
                     let isGold = [9,10,11].includes(s.Rarity);
-                    
                     if (isGold && !showGolds) return;
-
                     const displayId = isGold ? `<span style="color:#d4af37;font-weight:bold;">[${id}]</span>` : id;
 
                     if (s.OwnedCount === 0 && fDoubles[setNum]?.includes(id)) getList.push(displayId);
@@ -327,7 +395,7 @@
             resultsDiv.innerHTML = `<div style="flex:1; min-width:250px; background:#e8f5e9; padding:15px; border-radius:10px; border:1px solid #c8e6c9;"><h4 style="margin:0 0 10px 0; color:#2e7d32;">🎁 Recevables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGet || "Aucun"}</div></div><div style="flex:1; min-width:250px; background:#fff3e0; padding:15px; border-radius:10px; border:1px solid #ef6c00;"><h4 style="margin:0 0 10px 0; color:#ef6c00;">🤝 Donnables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGive || "Aucun"}</div></div>`;
         };
 
-        // --- Evenements ---
+        // --- Événements Onglet 1 & 2 ---
         document.getElementById('copy-my-id').onclick = (e) => copyToClip(myId, e.target);
         document.getElementById('import-my-id').onclick = () => {
             const newId = prompt("Collez l'ID à importer :", myId);
@@ -344,8 +412,13 @@
             setTimeout(() => { btn.innerHTML = "☁️ Partager mon Album"; btn.disabled = false; btn.style.background = "#27ae60"; }, 3000);
         };
 
-        fSelect.onchange = () => { fInput.value = fSelect.value; updateFavButtons(fSelect.value); };
-        fInput.oninput = () => updateFavButtons(fInput.value);
+        fSelect.onchange = () => { 
+            const id = fSelect.value;
+            fInput.value = id; 
+            fAlias.value = favsObj[id] || "";
+            updateFavButtons(id); 
+        };
+        fInput.oninput = () => { fAlias.value = favsObj[fInput.value.trim().toUpperCase()] || ""; updateFavButtons(fInput.value); };
 
         btnLoad.onclick = async () => {
             const id = fInput.value.trim(); if (!id) return;
@@ -364,24 +437,133 @@
 
         btnSave.onclick = async () => {
             const id = fInput.value.trim().toUpperCase();
-            let favs = getLocalFavs();
-            if (id && !favs.includes(id)) {
-                favs.push(id); setLocalFavs(favs);
-                try { await syncToCloud(data); showModal('comp'); } catch(e) { alert("Erreur cloud"); }
-            }
+            const alias = fAlias.value.trim();
+            if (!id) return;
+            let currentFavs = getLocalFavsObj();
+            currentFavs[id] = alias;
+            saveLocalFavsObj(currentFavs);
+            try { await syncToCloud(data); showModal('comp'); } catch(e) { alert("Erreur cloud"); }
         };
 
         btnDel.onclick = async () => {
             const id = fInput.value.trim().toUpperCase();
-            if (confirm(`Supprimer ${id} ?`)) {
-                let favs = getLocalFavs().filter(f => f !== id);
-                setLocalFavs(favs);
+            if (confirm(`Supprimer ${id} de vos amis ?`)) {
+                let currentFavs = getLocalFavsObj();
+                delete currentFavs[id];
+                saveLocalFavsObj(currentFavs);
                 try { await syncToCloud(data); showModal('comp'); } catch(e) { alert("Erreur cloud"); }
+            }
+        };
+
+        // --- LOGIQUE DE RECHERCHE GLOBALE (ONGLET 3) ---
+        document.getElementById('btn-run-global').onclick = async () => {
+            const currentFavs = getLocalFavsObj();
+            const friendIds = Object.keys(currentFavs);
+            const maxDays = parseInt(document.getElementById('filter-days').value);
+            const resultsContainer = document.getElementById('global-results-container');
+            const loadingDiv = document.getElementById('global-loading');
+            const progressSpan = document.getElementById('global-progress');
+
+            if (friendIds.length === 0) {
+                resultsContainer.innerHTML = `<p style="color:#e44d26; text-align:center; padding:20px; font-weight:bold;">❌ Vous n'avez aucun ami enregistré dans vos favoris.</p>`;
+                return;
+            }
+
+            resultsContainer.innerHTML = "";
+            loadingDiv.style.display = "block";
+            
+            let loadedFriendsData = [];
+            let processedCount = 0;
+            progressSpan.textContent = `0/${friendIds.length}`;
+
+            // Récupération asynchrone en parallèle de toutes les fiches amis
+            const promises = friendIds.map(async (id) => {
+                try {
+                    const fData = await fetchPlayerData(id);
+                    processedCount++;
+                    progressSpan.textContent = `${processedCount}/${friendIds.length}`;
+                    
+                    // Vérification du filtre de date
+                    const days = daysBetween(fData.updated_at, new Date().toISOString());
+                    if (days <= maxDays) {
+                        loadedFriendsData.push({
+                            id: id,
+                            alias: currentFavs[id] || "Sans nom",
+                            missing: parseFriendData(fData.missing_text),
+                            doubles: parseFriendData(fData.doubles_text),
+                            updatedAt: fData.updated_at,
+                            daysAgo: days
+                        });
+                    }
+                } catch(e) {
+                    processedCount++;
+                    progressSpan.textContent = `${processedCount}/${friendIds.length}`;
+                }
+            });
+
+            await Promise.all(promises);
+            loadingDiv.style.display = "none";
+
+            // Calcul de la recherche inversée : Cartes manquantes de l'utilisateur vs Doubles des amis
+            let globalHtml = [];
+            let totalFoundMissing = 0;
+
+            albumData.Sets.forEach((set, i) => {
+                let setNum = i + 1;
+                let setHtmlMatches = [];
+
+                set.Stickers.forEach(s => {
+                    let id = s.StickerId.split('.').pop();
+                    let isGold = [9,10,11].includes(s.Rarity);
+                    if (isGold && !showGolds) return;
+
+                    // Si la carte est manquante chez moi
+                    if (s.OwnedCount === 0) {
+                        totalFoundMissing++;
+                        // Chercher qui l'a en double
+                        let providers = [];
+                        loadedFriendsData.forEach(friend => {
+                            if (friend.doubles[setNum]?.includes(id)) {
+                                providers.push(`<b style="color:#27ae60;" title="Mis à jour il y a ${friend.daysAgo}j">${friend.alias}</b>`);
+                            }
+                        });
+
+                        const displayId = isGold ? `<span style="color:#d4af37;font-weight:bold;">[${id}]</span>` : `<b>${id}</b>`;
+                        if (providers.length > 0) {
+                            setHtmlMatches.push(`<div style="padding:6px 0; border-bottom:1px dashed #eee; font-size:0.85rem;">Sticker ${displayId} disponible chez : ${providers.join(', ')}</div>`);
+                        } else {
+                            setHtmlMatches.push(`<div style="padding:6px 0; border-bottom:1px dashed #eee; font-size:0.85rem; color:#999;">Sticker ${displayId} : <i>Personne ne l'a en double</i></div>`);
+                        }
+                    }
+                });
+
+                if (setHtmlMatches.length > 0) {
+                    globalHtml.push(`
+                        <div style="background:#fff; border:1px solid #ddd; border-radius:8px; padding:12px; box-shadow:0 2px 5px rgba(0,0,0,0.02);">
+                            <h4 style="margin:0 0 10px 0; color:#4287f5; border-bottom:2px solid #f0f4f8; padding-bottom:5px;">Set ${setNum}</h4>
+                            <div>${setHtmlMatches.join('')}</div>
+                        </div>
+                    `);
+                }
+            });
+
+            if (totalFoundMissing === 0) {
+                resultsContainer.innerHTML = `<p style="color:#27ae60; text-align:center; padding:20px; font-weight:bold;">🎉 Félicitations ! Vous n'avez aucune carte manquante (ou filtres golds désactivés).</p>`;
+            } else {
+                resultsContainer.innerHTML = `
+                    <div style="margin-bottom:10px; font-size:0.9rem; color:#666;">
+                        Analyse basée sur <b>${loadedFriendsData.length}</b> ami(s) actif(s) (mis à jour dans les ${maxDays === 999 ? 'tous' : maxDays} derniers jours).
+                    </div>
+                    <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:15px;">
+                        ${globalHtml.join('')}
+                    </div>
+                `;
             }
         };
 
         document.getElementById('tab-view').onclick = () => showModal('view');
         document.getElementById('tab-compare').onclick = () => showModal('comp');
+        document.getElementById('tab-search-global').onclick = () => showModal('global');
         document.getElementById('close-modal').onclick = () => overlay.remove();
         document.getElementById('toggle-gold').onchange = (e) => { showGolds = e.target.checked; showModal(activeTab); };
         document.getElementById('run-manual-compare').onclick = () => runCompareLogic(document.getElementById('friend-missing').value, document.getElementById('friend-doubles').value);
