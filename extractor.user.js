@@ -4,8 +4,8 @@
 // @match         https://*.monopolygo.com/*
 // @grant         GM_xmlhttpRequest
 // @connect       firestore.googleapis.com
-// @version       1.95
-// @author        Droopygoon1
+// @version       1.96
+// @author        Droopygoon
 // @downloadURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // @updateURL     https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // ==/UserScript==
@@ -13,7 +13,7 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.95";
+    const CURRENT_VERSION = "1.96";
     
     // --- CONFIGURATION FIREBASE ---
     const FIREBASE_PROJECT_ID = "mogo-album-extractor"; 
@@ -23,15 +23,21 @@
     let showGolds = true;
     let currentActiveTab = 'view';
     
-    // Données en cache pour éviter les requêtes réseau lors du masquage/affichage dynamique des Golds
     let lastLoadedFriendData = null;
     let lastGlobalResultsData = null;
+
+    const SECURITY_QUESTIONS = [
+        "1. Quel est le nom de votre premier animal de compagnie ?",
+        "2. Dans quelle ville êtes-vous né(e) ?",
+        "3. Quel est le nom de jeune fille de votre mère ?",
+        "4. Quel était le modèle de votre première voiture ?"
+    ];
 
     // --- Gestion Notification ---
     function checkUpdateNotification() {
         const lastVersion = localStorage.getItem('mgo_extractor_version');
         if (lastVersion && lastVersion !== CURRENT_VERSION) {
-            showUpdateToast(`🚀 v${CURRENT_VERSION} : Sécurisation des alias, filtres Ors dynamiques et affichage global épuré !`);
+            showUpdateToast(`🚀 v${CURRENT_VERSION} : Sécurisation optionnelle par mot de passe & récupération par question secrète !`);
         }
         localStorage.setItem('mgo_extractor_version', CURRENT_VERSION);
     }
@@ -65,7 +71,6 @@
         return id;
     }
 
-    // Gestion des favoris avec Alias
     function getLocalFavsObj() {
         const raw = localStorage.getItem('mgo_saved_friends_v2') || localStorage.getItem('mgo_saved_friends') || "[]";
         try {
@@ -104,33 +109,38 @@
         return Math.floor(Math.abs(d1 - d2) / (1000 * 60 * 60 * 24));
     }
 
-    function isGoldSticker(stickerId) {
-        if (!albumData) return false;
-        for (let set of albumData.Sets) {
-            for (let s of set.Stickers) {
-                if (s.StickerId.endsWith('.' + stickerId)) {
-                    return [9,10,11].includes(s.Rarity);
-                }
-            }
-        }
-        return false;
-    }
-
     // --- Communications Cloud (Firebase) ---
-    async function syncToCloud(data) {
+    async function syncToCloud(data, extraSecurity = {}) {
         const userId = getOrCreateUserID();
         const favsObj = getLocalFavsObj();
         const arrFormat = Object.keys(favsObj).map(id => favsObj[id] ? `${id}|${favsObj[id]}` : id);
         
-        const payload = {
-            fields: {
-                user_id: { stringValue: userId },
-                missing_text: { stringValue: data.rawM },
-                doubles_text: { stringValue: data.rawD },
-                friends_list: { arrayValue: { values: arrFormat.map(f => ({ stringValue: f })) } },
-                updated_at: { stringValue: new Date().toISOString() }
-            }
+        // Mot de passe local enregistré
+        const storedPass = localStorage.getItem('mgo_user_password') || "";
+
+        const fields = {
+            user_id: { stringValue: userId },
+            missing_text: { stringValue: data.rawM },
+            doubles_text: { stringValue: data.rawD },
+            friends_list: { arrayValue: { values: arrFormat.map(f => ({ stringValue: f })) } },
+            updated_at: { stringValue: new Date().toISOString() }
         };
+
+        if (storedPass) {
+            fields.password_hash = { stringValue: storedPass };
+        }
+
+        if (extraSecurity.password) {
+            fields.password_hash = { stringValue: extraSecurity.password };
+        }
+        if (extraSecurity.secQuestion) {
+            fields.sec_question = { stringValue: String(extraSecurity.secQuestion) };
+        }
+        if (extraSecurity.secAnswer) {
+            fields.sec_answer = { stringValue: extraSecurity.secAnswer.toLowerCase().trim() };
+        }
+
+        const payload = { fields };
 
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -162,7 +172,9 @@
                                 missing_text: fields.missing_text?.stringValue || "",
                                 doubles_text: fields.doubles_text?.stringValue || "",
                                 updated_at: fields.updated_at?.stringValue || "",
-                                friends_list: rawFriends
+                                friends_list: rawFriends,
+                                has_password: !!fields.password_hash?.stringValue,
+                                sec_question: fields.sec_question?.stringValue || ""
                             });
                         } else { reject("Données vides"); }
                     } catch(e) { reject("Données invalides"); }
@@ -243,8 +255,10 @@
     async function showModal(activeTab = 'view') {
         currentActiveTab = activeTab;
         const myId = getOrCreateUserID();
+        let myRemoteData = null;
+
         try {
-            const myRemoteData = await fetchPlayerData(myId);
+            myRemoteData = await fetchPlayerData(myId);
             if (myRemoteData && Array.isArray(myRemoteData.friends_list)) {
                 let mergedObj = getLocalFavsObj();
                 myRemoteData.friends_list.forEach(item => {
@@ -273,6 +287,8 @@
             return `<option value="${id}">${displayName}</option>`;
         }).join('');
 
+        const isProtected = myRemoteData?.has_password || !!localStorage.getItem('mgo_user_password');
+
         overlay.innerHTML = `
             <div style="width:950px; max-width:95%; max-height:90vh; background:#f8f9fa; border-radius:15px; overflow:hidden; display:flex; flex-direction:column; font-family:sans-serif;">
                 <div style="padding:15px 20px; background:#4287f5; color:white; display:flex; justify-content:space-between; align-items:center;">
@@ -285,15 +301,37 @@
                     <button id="tab-search-global" style="flex:1; padding:12px; border:none; background:${activeTab=='global'?'#fff':'#eee'}; cursor:pointer; font-weight:bold; border-left:1px solid #ddd; color:#27ae60;">🔎 Recherche Globale</button>
                 </div>
 
+                <!-- ONGLET 1 : MON INVENTAIRE -->
                 <div id="content-view" style="display:${activeTab==='view'?'block':'none'}; padding:20px; overflow-y:auto; background:#fff;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; background:#f0f7ff; padding:10px; border-radius:8px; border:1px solid #bae0ff; flex-wrap:wrap; gap:10px;">
                         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                             <strong>ID : <span id="display-my-id" style="color:#4287f5; font-size:1.1rem;">${myId}</span></strong>
                             <button id="copy-my-id" style="background:#4287f5; color:white; border:none; padding:6px 10px; font-size:0.75rem; border-radius:4px; cursor:pointer;">Copier</button>
                             <button id="import-my-id" style="background:#666; color:white; border:none; padding:6px 10px; font-size:0.75rem; border-radius:4px; cursor:pointer;">Importer ID</button>
+                            <button id="btn-sec-config" style="background:${isProtected?'#27ae60':'#e67e22'}; color:white; border:none; padding:6px 10px; font-size:0.75rem; border-radius:4px; cursor:pointer; font-weight:bold;">${isProtected?'🔒 Sécurisé':'🔓 Sécuriser ID'}</button>
                         </div>
                         <button id="btn-sync-cloud" style="background:#27ae60; color:white; border:none; padding:10px 15px; border-radius:5px; cursor:pointer; font-weight:bold;">☁️ Partager mon Album</button>
                     </div>
+
+                    <!-- PANNEAU SÉCURITÉ -->
+                    <div id="sec-panel" style="display:none; background:#fff3cd; border:1px solid #ffeeba; padding:15px; border-radius:8px; margin-bottom:15px;">
+                        <h4 style="margin:0 0 10px 0; color:#856404;">🔒 Sécurisation de l'ID</h4>
+                        <div style="display:flex; flex-direction:column; gap:10px; max-width:500px;">
+                            <input type="password" id="sec-pass-input" placeholder="Mot de passe (enregistré automatiquement)..." style="padding:8px; border-radius:5px; border:1px solid #ccc;">
+                            
+                            <label style="font-size:0.8rem; font-weight:bold; color:#856404;">Question de sécurité en cas d'oubli :</label>
+                            <select id="sec-q-select" style="padding:8px; border-radius:5px; border:1px solid #ccc; background:white;">
+                                ${SECURITY_QUESTIONS.map((q, idx) => `<option value="${idx+1}">${q}</option>`).join('')}
+                            </select>
+                            <input type="text" id="sec-a-input" placeholder="Réponse à la question..." style="padding:8px; border-radius:5px; border:1px solid #ccc;">
+                            
+                            <div style="display:flex; gap:10px;">
+                                <button id="btn-save-sec" style="background:#27ae60; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold;">Enregistrer la protection</button>
+                                <button id="btn-reset-sec" style="background:#d35400; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer; display:${myRemoteData?.has_password?'inline-block':'none'};">Réinitialiser (Mot de passe oublié ?)</button>
+                            </div>
+                        </div>
+                    </div>
+
                     <div style="margin-bottom:15px; display:flex; align-items:center; gap:10px; font-size:0.85rem;">
                         <input type="checkbox" id="toggle-gold-view" class="toggle-gold-cb" ${showGolds ? 'checked' : ''}> <label for="toggle-gold-view">Afficher les Ors [Golds]</label>
                     </div>
@@ -309,6 +347,7 @@
                     </div>
                 </div>
 
+                <!-- ONGLET 2 : COMPARER 1 À 1 -->
                 <div id="content-compare" style="display:${activeTab==='comp'?'block':'none'}; padding:20px; overflow-y:auto; background:#fff;">
                     <div style="margin-bottom:20px; border-bottom:1px solid #eee; padding-bottom:15px;">
                         <h4 style="margin:0 0 10px 0; color:#4287f5;">1. Charger un ami</h4>
@@ -347,6 +386,7 @@
                     <div id="compare-results" style="display:flex; flex-wrap:wrap; gap:20px; border-top:2px solid #f0f0f0; padding-top:20px;"></div>
                 </div>
 
+                <!-- ONGLET 3 : RECHERCHE GLOBALE -->
                 <div id="content-global" style="display:${activeTab==='global'?'block':'none'}; padding:20px; overflow-y:auto; background:#fff;">
                     <div style="background:#eafaf1; padding:15px; border-radius:10px; border:1px solid #d4efdf; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
                         <div>
@@ -386,12 +426,10 @@
         const btnLoad = document.getElementById('btn-load-friend');
         const btnSave = document.getElementById('btn-save-friend');
         const btnDel = document.getElementById('btn-del-friend');
+        const secPanel = document.getElementById('sec-panel');
 
-        // Remplacement automatique des espaces par un "_" et nettoyage en temps réel
         fAlias.oninput = function() {
-            let val = fAlias.value;
-            val = val.replace(/\s+/g, '_'); 
-            val = val.replace(/[^a-zA-Z0-9À-ÿ_\-.,@]/g, '');
+            let val = fAlias.value.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9À-ÿ_\-.,@]/g, '');
             if (val.length > 20) val = val.substring(0, 20);
             fAlias.value = val;
         };
@@ -499,19 +537,70 @@
         };
 
         // --- Événements Clicks ---
+        document.getElementById('btn-sec-config').onclick = () => {
+            secPanel.style.display = (secPanel.style.display === 'none') ? 'block' : 'none';
+        };
+
+        document.getElementById('btn-save-sec').onclick = async () => {
+            const pass = document.getElementById('sec-pass-input').value.trim();
+            const q = document.getElementById('sec-q-select').value;
+            const a = document.getElementById('sec-a-input').value.trim();
+
+            if (!pass || !a) {
+                alert("Veuillez renseigner un mot de passe ET une réponse à la question de sécurité.");
+                return;
+            }
+
+            try {
+                await syncToCloud(data, { password: pass, secQuestion: q, secAnswer: a });
+                localStorage.setItem('mgo_user_password', pass);
+                alert("🔒 Sécurité activée avec succès ! Le mot de passe a été mémorisé sur ce navigateur.");
+                showModal('view');
+            } catch(e) {
+                alert("❌ Erreur lors de l'enregistrement de la sécurité.");
+            }
+        };
+
+        document.getElementById('btn-reset-sec').onclick = async () => {
+            const q = document.getElementById('sec-q-select').value;
+            const a = document.getElementById('sec-a-input').value.trim();
+            const newPass = prompt("Indiquez votre NOUVEAU mot de passe :");
+
+            if (!a || !newPass || !newPass.trim()) {
+                alert("Veuillez remplir la réponse à la question et indiquer un nouveau mot de passe.");
+                return;
+            }
+
+            try {
+                await syncToCloud(data, { password: newPass.trim(), secQuestion: q, secAnswer: a });
+                localStorage.setItem('mgo_user_password', newPass.trim());
+                alert("✅ Mot de passe réinitialisé et mémorisé avec succès !");
+                showModal('view');
+            } catch(e) {
+                alert("❌ Échec de la réinitialisation : Réponse de sécurité incorrecte ou erreur réseau.");
+            }
+        };
+
         document.getElementById('copy-my-id').onclick = (e) => copyToClip(myId, e.target);
         document.getElementById('import-my-id').onclick = () => {
             const newId = prompt("Collez l'ID à importer :", myId);
             if (newId && newId.trim() !== "") {
                 localStorage.setItem('mgo_user_id', newId.trim().toUpperCase());
+                localStorage.removeItem('mgo_user_password'); // Réinitialise le mot de passe local si on change d'ID
                 showModal('view');
             }
         };
 
         document.getElementById('btn-sync-cloud').onclick = async (e) => {
             const btn = e.target; btn.innerHTML = "...⌛..."; btn.disabled = true;
-            try { await syncToCloud(data); btn.innerHTML = "✅ Partagé !"; }
-            catch (err) { btn.innerHTML = "❌ Erreur"; }
+            try { 
+                await syncToCloud(data); 
+                btn.innerHTML = "✅ Partagé !"; 
+            }
+            catch (err) { 
+                btn.innerHTML = "❌ Accès Refusé"; 
+                alert("⚠️ Erreur de synchronisation. Si vous avez protégé cet ID, vérifiez que le mot de passe est bien configuré sur ce navigateur.");
+            }
             setTimeout(() => { btn.innerHTML = "☁️ Partager mon Album"; btn.disabled = false; }, 2500);
         };
 
