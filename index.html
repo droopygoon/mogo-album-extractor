@@ -23,6 +23,16 @@
         .btn { display: inline-block; background: var(--primary); color: white; padding: 18px 40px; border-radius: 40px; text-decoration: none; font-weight: bold; font-size: 1.2rem; transition: all 0.3s; box-shadow: 0 4px 15px rgba(66,135,245,0.4); }
         .btn:hover { background: #336fd4; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(66,135,245,0.5); }
         
+        /* Galerie d'aperçus */
+        .preview-gallery { display: flex; justify-content: center; gap: 15px; margin-top: 25px; flex-wrap: wrap; }
+        .preview-item { flex: 1; min-width: 150px; max-width: 250px; height: 200px; border-radius: 10px; overflow: hidden; border: 1px solid #e0e0e0; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; background: #fafafa; }
+        .preview-item:hover { transform: translateY(-3px); box-shadow: 0 5px 15px rgba(0,0,0,0.15); }
+        .preview-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+        /* Lightbox pour la vue agrandie */
+        .lightbox-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 10000; justify-content: center; align-items: center; cursor: pointer; backdrop-filter: blur(4px); }
+        .lightbox-overlay img { max-width: 90%; max-height: 90vh; border-radius: 8px; box-shadow: 0 5px 25px rgba(0,0,0,0.5); cursor: default; }
+
         /* Navigation par Onglets */
         .tab-nav { display: flex; gap: 10px; border-bottom: 2px solid #eee; margin-top: 40px; margin-bottom: 25px; }
         .tab-btn { padding: 12px 24px; border: none; background: none; font-size: 1.05rem; font-weight: bold; color: #777; cursor: pointer; border-bottom: 3px solid transparent; transition: all 0.2s; }
@@ -53,6 +63,7 @@
         /* Responsive */
         @media (max-width: 600px) {
             .browser-grid, .features { grid-template-columns: 1fr; }
+            .preview-item { height: 140px; }
             .tab-btn { padding: 10px 12px; font-size: 0.9rem; }
         }
     </style>
@@ -78,8 +89,26 @@
         </header>
 
         <div class="cta-section">
-            <a href="extractor.user.js" class="btn" id="install-btn">🚀 Installer le Script <span class="script-version">(...)</span></a>
+            <a href="extractor.user.js" class="btn" id="install-btn">🚀 Installer / Mettre à jour le script <span class="script-version">(...)</span></a>
             <p style="font-size: 0.85rem; color: #888; margin-top: 15px;">Le script intercepte uniquement les données de votre navigateur. Aucune connexion directe à votre compte n'est effectuée.</p>
+            
+            <!-- Galerie d'aperçus -->
+            <div class="preview-gallery">
+                <div class="preview-item" onclick="openLightbox('https://freeimage.host/i/nKSjzGt')">
+                    <img src="https://freeimage.host/i/nKSjzGt" alt="Aperçu 1">
+                </div>
+                <div class="preview-item" onclick="openLightbox('https://freeimage.host/i/nKSjxnI')">
+                    <img src="https://freeimage.host/i/nKSjxnI" alt="Aperçu 2">
+                </div>
+                <div class="preview-item" onclick="openLightbox('https://freeimage.host/i/nKSjnZN')">
+                    <img src="https://freeimage.host/i/nKSjnZN" alt="Aperçu 3">
+                </div>
+            </div>
+        </div>
+
+        <!-- Lightbox Pop-up -->
+        <div id="lightbox" class="lightbox-overlay" onclick="closeLightbox()">
+            <img id="lightbox-img" src="" alt="Agrandissement">
         </div>
 
         <!-- NAVIGATION PAR ONGLETS -->
@@ -206,6 +235,16 @@
     <script async src="//s.imgur.com/min/embed.js" charset="utf-8"></script>
 
     <script>
+        // Gestion de la galerie Lightbox
+        function openLightbox(url) {
+            document.getElementById('lightbox-img').src = url;
+            document.getElementById('lightbox').style.display = 'flex';
+        }
+
+        function closeLightbox() {
+            document.getElementById('lightbox').style.display = 'none';
+        }
+
         // Gestion du changement d'onglets (Installation / Utilisation)
         function switchTab(tabName) {
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
