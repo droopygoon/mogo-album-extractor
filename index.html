@@ -14,11 +14,9 @@
         .tagline { color: #666; font-size: 1.1rem; margin-bottom: 20px; }
         
         .badge-security { display: inline-block; background: #e8f0fe; color: var(--primary); padding: 5px 15px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; margin-bottom: 20px; }
-
         .features { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; text-align: left; }
         .feature-item { background: #f9f9f9; padding: 15px; border-radius: 10px; border-bottom: 3px solid var(--primary); }
         .feature-item h3 { margin-top: 0; color: var(--primary); font-size: 1rem; }
-
         .cta-section { text-align: center; padding: 30px 0; border-top: 1px solid #eee; border-bottom: 1px solid #eee; margin: 30px 0; }
         .btn { display: inline-block; background: var(--primary); color: white; padding: 18px 40px; border-radius: 40px; text-decoration: none; font-weight: bold; font-size: 1.2rem; transition: all 0.3s; box-shadow: 0 4px 15px rgba(66,135,245,0.4); }
         .btn:hover { background: #336fd4; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(66,135,245,0.5); }
@@ -28,20 +26,16 @@
         .preview-item { flex: 1; min-width: 150px; max-width: 250px; height: 200px; border-radius: 10px; overflow: hidden; border: 1px solid #e0e0e0; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; background: #fafafa; }
         .preview-item:hover { transform: translateY(-3px); box-shadow: 0 5px 15px rgba(0,0,0,0.15); }
         .preview-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
-
         /* Lightbox pour la vue agrandie */
         .lightbox-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 10000; justify-content: center; align-items: center; cursor: pointer; backdrop-filter: blur(4px); }
         .lightbox-overlay img { max-width: 90%; max-height: 90vh; border-radius: 8px; box-shadow: 0 5px 25px rgba(0,0,0,0.5); cursor: default; }
-
         /* Navigation par Onglets */
         .tab-nav { display: flex; gap: 10px; border-bottom: 2px solid #eee; margin-top: 40px; margin-bottom: 25px; }
         .tab-btn { padding: 12px 24px; border: none; background: none; font-size: 1.05rem; font-weight: bold; color: #777; cursor: pointer; border-bottom: 3px solid transparent; transition: all 0.2s; }
         .tab-btn:hover { color: var(--primary); }
         .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
-
         .tab-content { display: none; }
         .tab-content.active { display: block; }
-
         .browser-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 20px; margin-bottom: 20px; }
         .browser-box { background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 12px; }
         .browser-box h3 { margin-top: 0; display: flex; align-items: center; gap: 10px; }
@@ -55,11 +49,9 @@
         .guide-badge { color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.9rem; font-weight: bold; }
         .guide-list { list-style: none; padding-left: 0; display: flex; flex-direction: column; gap: 12px; margin-top: 15px; }
         .guide-list code { background: #eef2f7; padding: 2px 6px; border-radius: 4px; color: #c7254e; font-size: 0.9em; }
-
         .footer { margin-top: 50px; text-align: center; font-size: 0.9rem; color: #999; border-top: 1px solid #eee; padding-top: 20px; }
         a { color: var(--primary); text-decoration: none; font-weight: 500; }
         a:hover { text-decoration: underline; }
-
         /* Responsive */
         @media (max-width: 600px) {
             .browser-grid, .features { grid-template-columns: 1fr; }
@@ -69,25 +61,23 @@
     </style>
 </head>
 <body>
-
     <div class="card">
         <header>
-            <div class="badge-security">🛡️ 100% Local & Sécurisé</div>
+            <div class="badge-security">🛡️ 100% Local & Sécurisé (SHA-256)</div>
             <h1>🐾 Monopoly Go Album Extractor</h1>
             <p class="tagline">L'outil indispensable pour compléter vos albums sans perdre de temps.</p>
             
             <div class="features">
                 <div class="feature-item">
-                    <h3>📋 Extraction Rapide</h3>
-                    Générez vos listes de manquantes et doubles en un clic, prêtes à être partagées sur Facebook ou Discord.
+                    <h3>📋 Extraction & Sécurisation Rapide</h3>
+                    Générez vos listes en un clic et protégez votre ID avec un mot de passe haché SHA-256 et une question secrète.
                 </div>
                 <div class="feature-item">
                     <h3>🤝 Comparateur Pro & Recherche Globale</h3>
-                    Comparez vos cartes avec vos amis en 1 à 1 ou scannez tout votre réseau pour trouver vos cartes manquantes.
+                    Comparez vos cartes 1 à 1 ou scannez tout votre réseau d'amis avec gestion dynamique des saisons d'album.
                 </div>
             </div>
         </header>
-
         <div class="cta-section">
             <a href="extractor.user.js" class="btn" id="install-btn">🚀 Installer / Mettre à jour le script <span class="script-version">(...)</span></a>
             <p style="font-size: 0.85rem; color: #888; margin-top: 15px;">Le script intercepte uniquement les données de votre navigateur. Aucune connexion directe à votre compte n'est effectuée.</p>
@@ -105,18 +95,15 @@
                 </div>
             </div>
         </div>
-
         <!-- Lightbox Pop-up -->
         <div id="lightbox" class="lightbox-overlay" onclick="closeLightbox()">
             <img id="lightbox-img" src="" alt="Agrandissement">
         </div>
-
         <!-- NAVIGATION PAR ONGLETS -->
         <div class="tab-nav">
             <button class="tab-btn active" onclick="switchTab('install')">⚙️ Guide d'installation</button>
             <button class="tab-btn" onclick="switchTab('usage')">📖 Guide d'utilisation</button>
         </div>
-
         <!-- CONTENU 1 : GUIDE D'INSTALLATION -->
         <div id="tab-install" class="tab-content active">
             <h2>⚙️ Guide d'installation</h2>
@@ -125,26 +112,23 @@
                 <div class="browser-box">
                     <h3>🦊 Firefox (PC & Android)</h3>
                     <p><span class="step-tag">1</span> Installez l'extension <b><a href="https://violentmonkey.github.io/" target="_blank">Violentmonkey</a></b> (recommandé).</p>
-                    <p>Les extensions Tampermonkey et Greasemonkey devraient également fonctionner mais ne sont pas testées.</p>
+                    <p>Les extensions Tampermonkey et Greasemonkey fonctionnent également.</p>
                     <p><span class="step-tag">2</span> Cliquez sur le bouton d'installation bleu ci-dessus.</p>
                     <p><span class="step-tag">3</span> Acceptez l'installation du script utilisateur.</p>
                 </div>
-
                 <div class="browser-box">
                     <h3>🌐 Chrome / Edge (PC)</h3>
                     <p><span class="step-tag">1</span> Installez <b><a href="https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" target="_blank">TamperMonkey</a></b>.</p>
-                    <p><span class="step-tag">2</span> <b>Important :</b> Rendez-vous dans la section de gestion de l'extension (voir image 1) pour activer l'autorisation des scripts utilisateurs (image 2).</p>
+                    <p><span class="step-tag">2</span> <b>Important :</b> Rendez-vous dans la section de gestion de l'extension pour activer l'autorisation des scripts utilisateurs.</p>
                     <p><span class="step-tag">3</span> Cliquez sur le bouton d'installation bleu ci-dessus.</p>
                 </div>
             </div>
-
             <div class="browser-box">
                 <h3>Ensuite :</h3>
                 <p><span class="step-tag">4</span> Rendez-vous sur la page web de <b><a href="https://www.monopolygo.com" target="_blank">Monopoly Go</a></b>.</p>
-                <p><span class="step-tag">5</span> Si ce n'est pas déjà fait, connectez-vous à votre compte et allez sur la page <b><a href="https://www.monopolygo.com/sticker-album" target="_blank">album</a></b>.</p>
-                <p><span class="step-tag">6</span> Une fois la page chargée, un bouton bleu <b>"🐾 Bilan Album"</b> apparaîtra en bas à droite !</p>
+                <p><span class="step-tag">5</span> Connectez-vous à votre compte et allez sur la page <b><a href="https://www.monopolygo.com/sticker-album" target="_blank">album</a></b>.</p>
+                <p><span class="step-tag">6</span> Une fois la page chargée, le bouton bleu <b>"🐾 Bilan Album"</b> apparaîtra en bas à droite !</p>
             </div>
-
             <div style="margin-top: 30px; background: #fffbe6; padding: 20px; border-radius: 12px; border: 1px solid #ffe58f;">
                 <h4>📸 Aide visuelle pour Chrome :</h4>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
@@ -159,14 +143,12 @@
                 </div>
             </div>
         </div>
-
         <!-- CONTENU 2 : GUIDE D'UTILISATION -->
         <div id="tab-usage" class="tab-content">
             <h2>📖 Guide d'utilisation complet</h2>
             <p style="color: #666; margin-bottom: 25px;">
                 Découvrez comment exploiter toutes les fonctionnalités de l'application pour gérer votre album et organiser vos échanges efficacement.
             </p>
-
             <!-- SECTION MON INVENTAIRE -->
             <div class="guide-card">
                 <h3 style="color: #4287f5;">
@@ -177,15 +159,14 @@
                 
                 <ul class="guide-list">
                     <li><b>• ID Joueur :</b> Votre identifiant unique généré automatiquement (ex: <code>EXEMPLE-A1B2</code>). Utile pour que vos amis vous identifient sur le réseau.</li>
-                    <li><b>• Copier :</b> Copie instantanément votre ID dans le presse-papier pour le transmettre facilement à un ami.</li>
-                    <li><b>• Importer ID :</b> Permet d'importer un ID existant si vous changez d'appareil ou d'ordinateur.</li>
-                    <li><b>• 🔓 Sécuriser ID / 🔒 Sécurisé :</b> Ouvre un panneau pour créer un mot de passe et sélectionner une question de sécurité (avec réponse). Une fois configuré, le mot de passe est retenu automatiquement sur votre navigateur pour ne plus avoir à le saisir.</li>
-                    <li><b>• ☁️ Partager mon Album :</b> Publie votre inventaire (manquantes/doubles) sur le serveur. Indispensable pour que vos amis puissent voir ce que vous avez en double lors d'une recherche.</li>
-                    <li><b>• Case "Afficher les Ors [Golds]" :</b> Cocher cette case inclut les cartes Dorées (affichées entre crochets <code>[103]</code> et dorées) dans vos listes. Décocher masque ces cartes (car non échangeables hors événements spéciaux).</li>
-                    <li><b>• ❌ MANQUANTES & ✅ DOUBLES :</b> Vos listes complètes classées par numéro de set. Le bouton <i>"Copier"</i> au-dessus de chaque bloc permet de copier le texte formaté pour le coller sur Facebook ou Discord.</li>
+                    <li><b>• Copier :</b> Copie votre ID dans le presse-papier pour le transmettre à vos amis.</li>
+                    <li><b>• Importer ID :</b> Permet d'importer un ID existant si vous changez d'appareil.</li>
+                    <li><b>• 🔓 Sécuriser ID / 🔒 Sécurisé :</b> Ouvre un panneau pour définir un mot de passe et une question secrète. Le mot de passe et la réponse de sécurité sont hachés en <b>SHA-256</b> pour une sécurité optimale. Des interfaces distinctes vous permettent de mettre à jour le mot de passe ou de le réinitialiser en cas d'oubli grâce à votre question secrète.</li>
+                    <li><b>• ☁️ Partager mon Album :</b> Publie votre inventaire sur le Cloud ainsi que la saison d'album actuelle. Indispensable pour que vos amis vous trouvent lors d'une recherche.</li>
+                    <li><b>• Case "Afficher les Ors [Golds]" :</b> Permet d'inclure ou de masquer les cartes Dorées dans toutes les vues et comparaisons.</li>
+                    <li><b>• ❌ MANQUANTES & ✅ DOUBLES :</b> Vos listes complètes prêtes à copier pour Facebook ou Discord.</li>
                 </ul>
             </div>
-
             <!-- SECTION COMPARER 1 À 1 -->
             <div class="guide-card">
                 <h3 style="color: #4287f5;">
@@ -195,61 +176,55 @@
                 <p>Comparez précisément votre album avec celui d'un ami spécifique pour préparer un échange direct.</p>
                 
                 <ul class="guide-list">
-                    <li><b>• Sélecteur "Favoris / Amis" :</b> Choisissez un ami déjà enregistré pour charger automatiquement son identifiant et ses données.</li>
-                    <li><b>• Champs ID & Surnom :</b> Saisissez l'ID d'un joueur et attribuez-lui un surnom personnalisé (ex: <code>MARIE_FB</code>) pour le reconnaître rapidement dans vos listes.</li>
+                    <li><b>• Sélecteur "Favoris / Amis" :</b> Choisissez un ami enregistré pour charger automatiquement son ID et son alias.</li>
+                    <li><b>• Champs ID & Surnom :</b> Saisissez l'ID d'un joueur et attribuez-lui un surnom personnalisé.</li>
                     <li><b>• Boutons d'action :</b> 
-                        <br>&nbsp;&nbsp;- <b>Récupérer :</b> Charge les dernières données partagées par cet ami sur le cloud.
-                        <br>&nbsp;&nbsp;- <b>⭐ (Sauvegarder) :</b> Enregistre/Modifie le joueur et son surnom dans votre liste de favoris.
-                        <br>&nbsp;&nbsp;- <b>🗑️ (Supprimer) :</b> Retire le joueur de vos favoris.
+                        <br>&nbsp;&nbsp;- <b>Récupérer :</b> Charge les données Cloud de l'ami et affiche un avertissement si l'ami est resté sur une ancienne saison d'album.
+                        <br>&nbsp;&nbsp;- <b>⭐ (Sauvegarder) :</b> Enregistre/Modifie le favori.
+                        <br>&nbsp;&nbsp;- <b>🗑️ (Supprimer) :</b> Retire le favori.
+                        <br>&nbsp;&nbsp;- <b>🧹 RàZ :</b> Réinitialise rapidement la zone d'affichage et de comparaison.
                     </li>
-                    <li><b>• Date de mise à jour :</b> Indique l'horodatage exact du dernier partage effectué par l'ami (ex: <i>Mis à jour : 31/08 à 14:30</i>).</li>
-                    <li><b>• Zones de texte "SES MANQUANTES" / "SES DOUBLES" :</b> Affiche les listes de l'ami. Vous pouvez également y coller directement le texte brut de n'importe quel joueur et cliquer sur <i>"Comparer manuellement"</i>.</li>
+                    <li><b>• Date & Saison d'album :</b> Indique la date de mise à jour et signale par un avertissement si l'ami est sur un album différent du vôtre.</li>
                     <li><b>• Résultats d'échange :</b> 
-                        <br>&nbsp;&nbsp;- <b>🎁 Recevables :</b> Liste des cartes qu'il vous manque et que cet ami possède en double.
-                        <br>&nbsp;&nbsp;- <b>🤝 Donnables :</b> Liste des cartes que cet ami cherche et que vous possédez en double.</li>
+                        <br>&nbsp;&nbsp;- <b>🎁 Recevables :</b> Cartes qu'il vous manque et que cet ami a en double.
+                        <br>&nbsp;&nbsp;- <b>🤝 Donnables :</b> Cartes qu'il cherche et que vous avez en double.</li>
                 </ul>
             </div>
-
             <!-- SECTION RECHERCHE GLOBALE -->
             <div class="guide-card">
                 <h3 style="color: #27ae60;">
                     <span class="guide-badge" style="background: #27ae60;">3</span>
                     Onglet : 🔎 Recherche Globale
                 </h3>
-                <p>Scannez l'ensemble de vos amis enregistrés en une seule action pour savoir immédiatement qui possède les cartes qui vous manquent.</p>
+                <p>Scannez l'ensemble de vos amis enregistrés pour savoir immédiatement qui possède vos cartes manquantes.</p>
                 
                 <ul class="guide-list">
-                    <li><b>• Filtre "Actifs depuis" :</b> Permet de filtrer la recherche selon la récence de mise à jour de vos amis (<i>Aujourd'hui, 3 jours, 7 jours...</i>) afin d'éviter de contacter des joueurs inactifs.</li>
-                    <li><b>• Bouton "Lancer la Recherche" :</b> Interroge le serveur pour l'intégralité de vos favoris et croise automatiquement leurs doubles avec vos cartes manquantes.</li>
-                    <li><b>• Résultats synthétiques par Set :</b> Organise les cartes qu'il vous manque set par set et vous indique clairement le nom de chaque ami qui en possède un double (ex: <i>Sticker 12 disponible chez : MARIE_FB, JEAN_M</i>).</li>
+                    <li><b>• Filtre "Actifs depuis" :</b> Filtre les amis selon leur récence (<i>Aujourd'hui, 3 jours, 7 jours...</i>).</li>
+                    <li><b>• Contrôle de Saison :</b> Écarte automatiquement les amis dont l'album enregistré ne correspond plus à l'album de la saison en cours.</li>
+                    <li><b>• Bouton "Lancer la Recherche" :</b> Effectue l'analyse croisée et mémorise vos réglages.</li>
+                    <li><b>• Résultats synthétiques :</b> Présente la liste des cartes manquantes set par set avec les amis disposant d'un double disponible.</li>
                 </ul>
             </div>
         </div>
-
         <div class="footer">
             Développé avec ❤️ par <strong>Droopygoon</strong> &bull; Version <span class="script-version">...</span> &bull; © 2026<br>
             <small>Ce script n'est pas affilié à Scopely ou Monopoly Go.</small>
         </div>
     </div>
-
     <script async src="//s.imgur.com/min/embed.js" charset="utf-8"></script>
-
     <script>
         // Gestion de la galerie Lightbox
         function openLightbox(url) {
             document.getElementById('lightbox-img').src = url;
             document.getElementById('lightbox').style.display = 'flex';
         }
-
         function closeLightbox() {
             document.getElementById('lightbox').style.display = 'none';
         }
-
         // Gestion du changement d'onglets (Installation / Utilisation)
         function switchTab(tabName) {
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-
             if (tabName === 'install') {
                 document.querySelectorAll('.tab-btn')[0].classList.add('active');
                 document.getElementById('tab-install').classList.add('active');
@@ -258,7 +233,6 @@
                 document.getElementById('tab-usage').classList.add('active');
             }
         }
-
         // Récupération dynamique de la version depuis extractor.user.js
         document.addEventListener("DOMContentLoaded", function() {
             fetch('extractor.user.js')
