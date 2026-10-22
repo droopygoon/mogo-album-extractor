@@ -4,7 +4,7 @@
 // @match         https://*.monopolygo.com/*
 // @grant         GM_xmlhttpRequest
 // @connect       firestore.googleapis.com
-// @version       1.97
+// @version       1.98
 // @author        Droopygoon
 // @downloadURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // @updateURL     https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
@@ -13,16 +13,16 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.97";
-    
+    const CURRENT_VERSION = "1.98";
+
     // --- CONFIGURATION FIREBASE ---
-    const FIREBASE_PROJECT_ID = "mogo-album-extractor"; 
+    const FIREBASE_PROJECT_ID = "mogo-album-extractor";
     const FB_BASE_URL = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/players_data`;
 
     let albumData = null;
     let showGolds = false; // Masqué par défaut
     let currentActiveTab = 'view';
-    
+
     // Rétention d'état inter-onglets
     let lastLoadedFriendData = null;
     let lastCompareInputs = { id: "", alias: "", missing: "", doubles: "", statusHtml: "" };
@@ -46,11 +46,11 @@
         return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
-    // --- Gestion Notification ---
+    // --- Gestion Notification & Désynchronisation ---
     function checkUpdateNotification() {
         const lastVersion = localStorage.getItem('mgo_extractor_version');
         if (lastVersion && lastVersion !== CURRENT_VERSION) {
-            showUpdateToast(`🚀 v${CURRENT_VERSION} : Chiffrement SHA-256, gestion dynamique des saisons & sécurité renforcée !`);
+            showUpdateToast(`🚀 v${CURRENT_VERSION} : Prise en charge de la gestion multi-appareils & désynchronisation !`);
         }
         localStorage.setItem('mgo_extractor_version', CURRENT_VERSION);
     }
@@ -60,6 +60,31 @@
         t.setAttribute('style', 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#27ae60;color:white;padding:12px 25px;border-radius:50px;z-index:10001;font-family:sans-serif;font-weight:bold;box-shadow:0 4px 15px rgba(0,0,0,0.2);transition:opacity 0.5s;');
         t.innerHTML = msg; document.body.appendChild(t);
         setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 500); }, 4000);
+    }
+
+    function showDesyncBanner() {
+        if (document.getElementById('mgo-desync-banner')) return;
+        const b = document.createElement('div');
+        b.id = 'mgo-desync-banner';
+        b.setAttribute('style', 'position:fixed;top:15px;left:50%;transform:translateX(-50%);background:#e67e22;color:white;padding:12px 20px;border-radius:10px;z-index:10002;font-family:sans-serif;font-size:0.9rem;box-shadow:0 4px 15px rgba(0,0,0,0.3);display:flex;align-items:center;gap:15px;max-width:90%;');
+        b.innerHTML = `
+            <span>Votre mot de passe a été modifié depuis un autre appareil. Mettez celui-ci à jour sur ce navigateur pour pouvoir continuer à partager vos albums depuis cet appareil.</span>
+            <div style="display:flex; gap:8px; flex-shrink:0;">
+                <button id="btn-desync-later" style="background:rgba(255,255,255,0.2); color:white; border:none; padding:6px 12px; border-radius:5px; cursor:pointer; font-weight:bold;">Plus tard</button>
+                <button id="btn-desync-update" style="background:white; color:#e67e22; border:none; padding:6px 12px; border-radius:5px; cursor:pointer; font-weight:bold;">Mettre à jour</button>
+            </div>
+        `;
+        document.body.appendChild(b);
+
+        document.getElementById('btn-desync-later').onclick = () => b.remove();
+        document.getElementById('btn-desync-update').onclick = () => {
+            b.remove();
+            showModal('view');
+            setTimeout(() => {
+                const secPanel = document.getElementById('sec-panel');
+                if (secPanel) secPanel.style.display = 'block';
+            }, 200);
+        };
     }
 
     if (document.readyState === 'complete') checkUpdateNotification();
@@ -127,7 +152,7 @@
         const userId = getOrCreateUserID();
         const favsObj = getLocalFavsObj();
         const arrFormat = Object.keys(favsObj).map(id => favsObj[id] ? `${id}|${favsObj[id]}` : id);
-        
+
         const storedHash = localStorage.getItem('mgo_user_password_hash') || "";
         const storedSecQ = localStorage.getItem('mgo_user_sec_q') || "";
         const storedSecAHash = localStorage.getItem('mgo_user_sec_a_hash') || "";
@@ -162,7 +187,7 @@
 
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
-                method: "PATCH", 
+                method: "PATCH",
                 url: `${FB_BASE_URL}/${userId}`,
                 headers: { "Content-Type": "application/json" },
                 data: JSON.stringify(payload),
@@ -229,7 +254,7 @@
                 const setNum = parseInt(match[1]);
                 const ids = match[2].split(',')
                                     .map(id => id.trim().replace('[','').replace(']',''))
-                                    .filter(id => id.length > 0); 
+                                    .filter(id => id.length > 0);
                 if(ids.length > 0) result[setNum] = ids;
             }
         });
@@ -238,8 +263,8 @@
 
     function generateContent() {
         let mLines = [], dLines = [];
-        let rawM = "", rawD = "";       
-        let cloudM = "", cloudD = "";   
+        let rawM = "", rawD = "";
+        let cloudM = "", cloudD = "";
 
         albumData.Sets.forEach((set, i) => {
             let mList = [], dList = [];
@@ -252,22 +277,22 @@
 
                 if (s.OwnedCount === 0) {
                     cloudMList.push(isGold ? `[${id}]` : id);
-                    if (!isGold) { 
-                        mList.push(id); 
-                        rawMList.push(id); 
-                    } else if (showGolds) { 
-                        mList.push(`<span style="color:#d4af37;font-weight:bold;">[${id}]</span>`); 
-                        rawMList.push(`[${id}]`); 
+                    if (!isGold) {
+                        mList.push(id);
+                        rawMList.push(id);
+                    } else if (showGolds) {
+                        mList.push(`<span style="color:#d4af37;font-weight:bold;">[${id}]</span>`);
+                        rawMList.push(`[${id}]`);
                     }
                 }
                 else if (s.OwnedCount > 1) {
                     cloudDList.push(isGold ? `[${id}]` : id);
-                    if (!isGold) { 
-                        dList.push(id); 
-                        rawDList.push(id); 
-                    } else if (showGolds) { 
-                        dList.push(`<span style="color:#d4af37;font-weight:bold;">[${id}]</span>`); 
-                        rawDList.push(`[${id}]`); 
+                    if (!isGold) {
+                        dList.push(id);
+                        rawDList.push(id);
+                    } else if (showGolds) {
+                        dList.push(`<span style="color:#d4af37;font-weight:bold;">[${id}]</span>`);
+                        rawDList.push(`[${id}]`);
                     }
                 }
             });
@@ -275,7 +300,7 @@
             const badge = `<span style="display:inline-block;width:25px;color:#4287f5;font-weight:bold;">${i+1}-</span>`;
             if (mList.length) mLines.push(`<div>${badge}${mList.join(',')}</div>`);
             if (dList.length) dLines.push(`<div>${badge}${dList.join(',')}</div>`);
-            
+
             if (rawMList.length) rawM += `${i+1}-${rawMList.join(',')}\n`;
             if (rawDList.length) rawD += `${i+1}-${rawDList.join(',')}\n`;
 
@@ -292,6 +317,15 @@
         b.id = 'btn-album-float'; b.innerHTML = '🐾 Bilan Album';
         b.setAttribute('style', 'position:fixed;bottom:25px;right:25px;z-index:9999;padding:12px 20px;background:#4287f5;color:white;border-radius:30px;border:none;cursor:pointer;font-weight:bold;box-shadow:0 4px 15px rgba(66,135,245,0.4);');
         b.onclick = () => showModal('view'); document.body.appendChild(b);
+
+        // Vérification de désynchronisation au premier chargement
+        const myId = getOrCreateUserID();
+        fetchPlayerData(myId).then(remoteData => {
+            const localHash = localStorage.getItem('mgo_user_password_hash') || "";
+            if (remoteData.has_password && remoteData.password_hash !== localHash) {
+                showDesyncBanner();
+            }
+        }).catch(() => {});
     }
 
     async function showModal(activeTab = 'view') {
@@ -331,9 +365,11 @@
         }).join('');
 
         const isProtected = myRemoteData?.has_password || !!localStorage.getItem('mgo_user_password_hash');
+        const localHash = localStorage.getItem('mgo_user_password_hash') || "";
+        const isDesynced = myRemoteData?.has_password && (myRemoteData.password_hash !== localHash);
         const hasCompareData = !!(lastCompareInputs.id || lastCompareInputs.missing || lastCompareInputs.doubles);
 
-        // Construction dynamique du panneau de sécurité
+        // Construction dynamique du panneau de sécurité selon l'état actuel (Protegé / Désynchronisé / Non Protégé)
         let secPanelHTML = "";
         if (!isProtected) {
             secPanelHTML = `
@@ -352,16 +388,24 @@
                     </div>
                     <button id="btn-save-sec" style="background:#27ae60; color:white; border:none; padding:10px 15px; border-radius:5px; cursor:pointer; font-weight:bold; width:max-content;">Activer la protection</button>
                 </div>`;
+        } else if (isDesynced) {
+            secPanelHTML = `
+                <h4 style="margin:0 0 10px 0; color:#d35400;">⚠️ Compte désynchronisé</h4>
+                <p style="margin:0 0 10px 0; font-size:0.85rem; color:#856404;">Votre mot de passe a été modifié sur un autre appareil, veuillez le mettre à jour sur ce navigateur pour pouvoir continuer à utiliser tous les fonctionnalités de partage.<br><b>Actuellement seule la lecture de vos albums est possible.</b></p>
+                <div style="display:flex; gap:10px; max-width:400px;">
+                    <input type="password" id="sec-sync-pass" placeholder="Mot de passe à jour..." style="flex:1; padding:8px; border-radius:5px; border:1px solid #ccc;">
+                    <button id="btn-update-local-pass" style="background:#e67e22; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold;">Mettre à jour</button>
+                </div>`;
         } else {
             secPanelHTML = `
-                <h4 style="margin:0 0 10px 0; color:#27ae60;">🔒 Cet ID est sécurisé</h4>
+                <h4 style="margin:0 0 10px 0; color:#27ae60;">🔒 Ce compte est sécurisé</h4>
                 <div style="display:flex; gap:20px; flex-wrap:wrap;">
                     <!-- Bloc Modification Mot de Passe -->
                     <div style="flex:1; min-width:250px; background:#fff; padding:12px; border-radius:8px; border:1px solid #ddd;">
                         <strong style="color:#2c3e50; font-size:0.85rem; display:block; margin-bottom:8px;">Changer le mot de passe</strong>
                         <input type="password" id="sec-old-pass" placeholder="Mot de passe actuel..." style="width:100%; padding:6px; border-radius:4px; border:1px solid #ccc; margin-bottom:6px; box-sizing:border-box;">
                         <input type="password" id="sec-new-pass" placeholder="Nouveau mot de passe..." style="width:100%; padding:6px; border-radius:4px; border:1px solid #ccc; margin-bottom:8px; box-sizing:border-box;">
-                        <button id="btn-change-pass" style="background:#2980b9; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:0.8rem;">Mettre à jour</button>
+                        <button id="btn-change-pass" style="background:#2980b9; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:0.8rem;">Modifier le mot de passe</button>
                     </div>
 
                     <!-- Bloc Réinitialisation via Question Secrète -->
@@ -375,6 +419,18 @@
                         <button id="btn-reset-sec" style="background:#d35400; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:0.8rem;">Réinitialiser avec la question secrète</button>
                     </div>
                 </div>`;
+        }
+
+        let badgeBtnText = "🔓 Sécuriser ID";
+        let badgeBtnBg = "#e67e22";
+        if (isProtected) {
+            if (isDesynced) {
+                badgeBtnText = "⚠️ Désynchronisé";
+                badgeBtnBg = "#e67e22";
+            } else {
+                badgeBtnText = "🔒 Sécurisé";
+                badgeBtnBg = "#27ae60";
+            }
         }
 
         overlay.innerHTML = `
@@ -396,7 +452,7 @@
                             <strong>ID : <span id="display-my-id" style="color:#4287f5; font-size:1.1rem;">${myId}</span></strong>
                             <button id="copy-my-id" style="background:#4287f5; color:white; border:none; padding:6px 10px; font-size:0.75rem; border-radius:4px; cursor:pointer;">Copier</button>
                             <button id="import-my-id" style="background:#666; color:white; border:none; padding:6px 10px; font-size:0.75rem; border-radius:4px; cursor:pointer;">Importer ID</button>
-                            <button id="btn-sec-config" style="background:${isProtected?'#27ae60':'#e67e22'}; color:white; border:none; padding:6px 10px; font-size:0.75rem; border-radius:4px; cursor:pointer; font-weight:bold;">${isProtected?'🔒 Sécurisé':'🔓 Sécuriser ID'}</button>
+                            <button id="btn-sec-config" style="background:${badgeBtnBg}; color:white; border:none; padding:6px 10px; font-size:0.75rem; border-radius:4px; cursor:pointer; font-weight:bold;">${badgeBtnText}</button>
                         </div>
                         <button id="btn-sync-cloud" style="background:#27ae60; color:white; border:none; padding:10px 15px; border-radius:5px; cursor:pointer; font-weight:bold;">☁️ Partager mon Album</button>
                     </div>
@@ -528,14 +584,14 @@
             if (!resultsDiv) return;
 
             let canGet = "", canGive = "";
-            
+
             albumData.Sets.forEach((set, i) => {
                 let setNum = i + 1, getList = [], giveList = [];
                 set.Stickers.forEach(s => {
                     let id = s.StickerId.split('.').pop();
                     let isGold = [9,10,11].includes(s.Rarity);
-                    if (isGold && !showGolds) return; 
-                    
+                    if (isGold && !showGolds) return;
+
                     const displayId = isGold ? `<span style="color:#d4af37;font-weight:bold;">[${id}]</span>` : id;
                     if (s.OwnedCount === 0 && fDoubles[setNum]?.includes(id)) getList.push(displayId);
                     if (s.OwnedCount > 1 && fMissing[setNum]?.includes(id)) giveList.push(displayId);
@@ -563,7 +619,7 @@
                 set.Stickers.forEach(s => {
                     let id = s.StickerId.split('.').pop();
                     let isGold = [9,10,11].includes(s.Rarity);
-                    if (isGold && !showGolds) return; 
+                    if (isGold && !showGolds) return;
 
                     if (s.OwnedCount === 0) {
                         let providers = [];
@@ -610,7 +666,7 @@
             lastCompareInputs.missing = fMissingElem.value;
             lastCompareInputs.doubles = fDoublesElem.value;
             lastCompareInputs.statusHtml = document.getElementById('friend-status').innerHTML;
-            
+
             const hasData = !!(lastCompareInputs.id || lastCompareInputs.missing || lastCompareInputs.doubles);
             if (btnResetCompare) btnResetCompare.style.display = hasData ? 'block' : 'none';
         }
@@ -668,7 +724,7 @@
             secPanel.style.display = (secPanel.style.display === 'none') ? 'block' : 'none';
         };
 
-        // Enregistrer / Activer la protection (première fois)
+        // Enregistrer / Activar la protection (première fois)
         const btnSaveSec = document.getElementById('btn-save-sec');
         if (btnSaveSec) {
             btnSaveSec.onclick = async () => {
@@ -696,7 +752,35 @@
             };
         }
 
-        // Changer le mot de passe (avec contrôle préalable)
+        // Mettre à jour le mot de passe localement (en cas de désynchronisation)
+        const btnUpdateLocalPass = document.getElementById('btn-update-local-pass');
+        if (btnUpdateLocalPass) {
+            btnUpdateLocalPass.onclick = async () => {
+                const pass = document.getElementById('sec-sync-pass').value.trim();
+                if (!pass) { alert("Veuillez saisir le mot de passe."); return; }
+
+                btnUpdateLocalPass.disabled = true; btnUpdateLocalPass.innerText = "Vérification...";
+                try {
+                    const remote = await fetchPlayerData(myId);
+                    const inputHash = await hashPassword(pass);
+
+                    if (remote.password_hash && remote.password_hash !== inputHash) {
+                        alert("❌ Le mot de passe saisi ne correspond pas à celui enregistré sur le serveur.");
+                        btnUpdateLocalPass.disabled = false; btnUpdateLocalPass.innerText = "Mettre à jour";
+                        return;
+                    }
+
+                    localStorage.setItem('mgo_user_password_hash', inputHash);
+                    alert("✅ Mot de passe mémorisé localement avec succès ! Votre appareil est de nouveau synchronisé.");
+                    showModal('view');
+                } catch(e) {
+                    alert("❌ Erreur lors de la vérification du mot de passe.");
+                    btnUpdateLocalPass.disabled = false; btnUpdateLocalPass.innerText = "Mettre à jour";
+                }
+            };
+        }
+
+        // Changer le mot de passe sur le serveur (avec contrôle préalable)
         const btnChangePass = document.getElementById('btn-change-pass');
         if (btnChangePass) {
             btnChangePass.onclick = async () => {
@@ -715,7 +799,7 @@
 
                     if (remote.password_hash && remote.password_hash !== inputOldHash) {
                         alert("❌ Échec : Le mot de passe actuel saisi est incorrect !");
-                        btnChangePass.disabled = false; btnChangePass.innerText = "Mettre à jour";
+                        btnChangePass.disabled = false; btnChangePass.innerText = "Modifier le mot de passe";
                         return;
                     }
 
@@ -726,7 +810,7 @@
                     showModal('view');
                 } catch(e) {
                     alert("❌ Erreur lors de la mise à jour du mot de passe.");
-                    btnChangePass.disabled = false; btnChangePass.innerText = "Mettre à jour";
+                    btnChangePass.disabled = false; btnChangePass.innerText = "Modifier le mot de passe";
                 }
             };
         }
@@ -786,27 +870,27 @@
 
         document.getElementById('btn-sync-cloud').onclick = async (e) => {
             const btn = e.target; btn.innerHTML = "...⌛..."; btn.disabled = true;
-            try { 
-                await syncToCloud(data); 
-                btn.innerHTML = "✅ Partagé !"; 
+            try {
+                await syncToCloud(data);
+                btn.innerHTML = "✅ Partagé !";
             }
-            catch (err) { 
-                btn.innerHTML = "❌ Accès Refusé"; 
+            catch (err) {
+                btn.innerHTML = "❌ Accès Refusé";
                 alert("⚠️ Erreur de synchronisation. Si vous avez protégé cet ID, vérifiez que le mot de passe est bien configuré sur ce navigateur.");
             }
             setTimeout(() => { btn.innerHTML = "☁️ Partager mon Album"; btn.disabled = false; }, 2500);
         };
 
-        fSelect.onchange = () => { 
-            const id = fSelect.value; fInput.value = id; 
-            fAlias.value = favsObj[id] || ""; 
-            updateFavButtons(id); 
+        fSelect.onchange = () => {
+            const id = fSelect.value; fInput.value = id;
+            fAlias.value = favsObj[id] || "";
+            updateFavButtons(id);
             trackCompareInputs();
         };
-        
-        fInput.oninput = () => { 
-            fAlias.value = favsObj[fInput.value.trim().toUpperCase()] || ""; 
-            updateFavButtons(fInput.value); 
+
+        fInput.oninput = () => {
+            fAlias.value = favsObj[fInput.value.trim().toUpperCase()] || "";
+            updateFavButtons(fInput.value);
             trackCompareInputs();
         };
 
@@ -815,19 +899,19 @@
             btnLoad.innerHTML = "⌛...";
             try {
                 const friendData = await fetchPlayerData(id);
-                lastLoadedFriendData = friendData; 
+                lastLoadedFriendData = friendData;
                 fMissingElem.value = friendData.missing_text;
                 fDoublesElem.value = friendData.doubles_text;
-                
+
                 const currentAlbum = albumData?.AlbumName || albumData?.AlbumId || "";
                 let statusStr = `📅 Mis à jour : <b>${formatDate(friendData.updated_at)}</b>`;
-                
+
                 if (friendData.album_name && currentAlbum && friendData.album_name !== currentAlbum) {
                     statusStr += ` <span style="color:#e74c3c; font-weight:bold; margin-left:10px;">⚠️ Ancien album (${friendData.album_name})</span>`;
                 }
 
                 document.getElementById('friend-status').innerHTML = statusStr;
-                
+
                 trackCompareInputs();
                 runCompareLogic(friendData.missing_text, friendData.doubles_text);
                 btnLoad.innerHTML = "Récupérer"; updateFavButtons(id);
@@ -867,21 +951,21 @@
             resultsContainer.innerHTML = ""; loadingDiv.style.display = "block";
             lastGlobalResultsData = [];
             let processedCount = 0; progressSpan.textContent = `0/${friendIds.length}`;
-            
+
             const myAlbumName = albumData?.AlbumName || albumData?.AlbumId || "";
 
             const promises = friendIds.map(async (id) => {
                 try {
                     const fData = await fetchPlayerData(id);
                     processedCount++; progressSpan.textContent = `${processedCount}/${friendIds.length}`;
-                    
+
                     const days = daysBetween(fData.updated_at, new Date().toISOString());
                     const isSameAlbum = !fData.album_name || !myAlbumName || (fData.album_name === myAlbumName);
 
                     if (days <= maxDays && isSameAlbum) {
                         lastGlobalResultsData.push({
                             id: id,
-                            alias: currentFavs[id] || id, 
+                            alias: currentFavs[id] || id,
                             missing: parseFriendData(fData.missing_text),
                             doubles: parseFriendData(fData.doubles_text)
                         });
@@ -900,15 +984,15 @@
             cb.onchange = (e) => {
                 showGolds = e.target.checked;
                 document.querySelectorAll('.toggle-gold-cb').forEach(box => box.checked = showGolds);
-                
+
                 if (currentActiveTab === 'view') {
                     const freshData = generateContent();
                     document.getElementById('my-missing-container').innerHTML = freshData.mHtml || "Aucune";
                     document.getElementById('my-doubles-container').innerHTML = freshData.dHtml || "Aucune";
-                } 
+                }
                 else if (currentActiveTab === 'comp' && (fMissingElem.value || fDoublesElem.value)) {
                     runCompareLogic(fMissingElem.value, fDoublesElem.value);
-                } 
+                }
                 else if (currentActiveTab === 'global' && lastGlobalResultsData) {
                     renderGlobalUI();
                 }
