@@ -4,7 +4,7 @@
 // @match         https://*.monopolygo.com/*
 // @grant         GM_xmlhttpRequest
 // @connect       firestore.googleapis.com
-// @version       1.96
+// @version       1.97
 // @author        Droopygoon
 // @downloadURL   https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
 // @updateURL     https://droopygoon.github.io/mogo-album-extractor/extractor.user.js
@@ -13,18 +13,21 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.96";
+    const CURRENT_VERSION = "1.80";
     
     // --- CONFIGURATION FIREBASE ---
     const FIREBASE_PROJECT_ID = "mogo-album-extractor"; 
     const FB_BASE_URL = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/players_data`;
 
     let albumData = null;
-    let showGolds = true;
+    let showGolds = false; // Masqué par défaut
     let currentActiveTab = 'view';
     
+    // Rétention d'état inter-onglets
     let lastLoadedFriendData = null;
+    let lastCompareInputs = { id: "", alias: "", missing: "", doubles: "", statusHtml: "" };
     let lastGlobalResultsData = null;
+    let lastGlobalFilterDays = "1";
 
     const SECURITY_QUESTIONS = [
         "1. Quel est le nom de votre premier animal de compagnie ?",
@@ -33,11 +36,21 @@
         "4. Quel était le modèle de votre première voiture ?"
     ];
 
+    // --- Fonction de Hachage Sécurisée (SHA-256) ---
+    async function hashPassword(plainText) {
+        if (!plainText) return "";
+        const encoder = new TextEncoder();
+        const data = encoder.encode(plainText);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
     // --- Gestion Notification ---
     function checkUpdateNotification() {
         const lastVersion = localStorage.getItem('mgo_extractor_version');
         if (lastVersion && lastVersion !== CURRENT_VERSION) {
-            showUpdateToast(`🚀 v${CURRENT_VERSION} : Sécurisation optionnelle par mot de passe & récupération par question secrète !`);
+            showUpdateToast(`🚀 v${CURRENT_VERSION} : Chiffrement SHA-256, gestion dynamique des saisons & sécurité renforcée !`);
         }
         localStorage.setItem('mgo_extractor_version', CURRENT_VERSION);
     }
@@ -115,29 +128,34 @@
         const favsObj = getLocalFavsObj();
         const arrFormat = Object.keys(favsObj).map(id => favsObj[id] ? `${id}|${favsObj[id]}` : id);
         
-        // Mot de passe local enregistré
-        const storedPass = localStorage.getItem('mgo_user_password') || "";
+        const storedHash = localStorage.getItem('mgo_user_password_hash') || "";
+        const storedSecQ = localStorage.getItem('mgo_user_sec_q') || "";
+        const storedSecAHash = localStorage.getItem('mgo_user_sec_a_hash') || "";
+        const currentAlbumName = albumData?.AlbumName || albumData?.AlbumId || "Inconnu";
 
         const fields = {
             user_id: { stringValue: userId },
-            missing_text: { stringValue: data.rawM },
-            doubles_text: { stringValue: data.rawD },
+            album_name: { stringValue: currentAlbumName },
+            missing_text: { stringValue: data.cloudM },
+            doubles_text: { stringValue: data.cloudD },
             friends_list: { arrayValue: { values: arrFormat.map(f => ({ stringValue: f })) } },
             updated_at: { stringValue: new Date().toISOString() }
         };
 
-        if (storedPass) {
-            fields.password_hash = { stringValue: storedPass };
-        }
+        if (storedHash) fields.password_hash = { stringValue: storedHash };
+        if (storedSecQ) fields.sec_question = { stringValue: storedSecQ };
+        if (storedSecAHash) fields.sec_answer = { stringValue: storedSecAHash };
 
         if (extraSecurity.password) {
-            fields.password_hash = { stringValue: extraSecurity.password };
+            const passHash = await hashPassword(extraSecurity.password);
+            fields.password_hash = { stringValue: passHash };
         }
         if (extraSecurity.secQuestion) {
             fields.sec_question = { stringValue: String(extraSecurity.secQuestion) };
         }
         if (extraSecurity.secAnswer) {
-            fields.sec_answer = { stringValue: extraSecurity.secAnswer.toLowerCase().trim() };
+            const ansHash = await hashPassword(extraSecurity.secAnswer.toLowerCase().trim());
+            fields.sec_answer = { stringValue: ansHash };
         }
 
         const payload = { fields };
@@ -169,12 +187,15 @@
                             const rawFriends = fields.friends_list?.arrayValue?.values?.map(v => v.stringValue) || [];
                             resolve({
                                 user_id: fields.user_id?.stringValue || targetId,
+                                album_name: fields.album_name?.stringValue || "",
                                 missing_text: fields.missing_text?.stringValue || "",
                                 doubles_text: fields.doubles_text?.stringValue || "",
                                 updated_at: fields.updated_at?.stringValue || "",
                                 friends_list: rawFriends,
                                 has_password: !!fields.password_hash?.stringValue,
-                                sec_question: fields.sec_question?.stringValue || ""
+                                password_hash: fields.password_hash?.stringValue || "",
+                                sec_question: fields.sec_question?.stringValue || "",
+                                sec_answer: fields.sec_answer?.stringValue || ""
                             });
                         } else { reject("Données vides"); }
                     } catch(e) { reject("Données invalides"); }
@@ -216,32 +237,53 @@
     }
 
     function generateContent() {
-        let mLines = [], dLines = [], rawM = "", rawD = "";
+        let mLines = [], dLines = [];
+        let rawM = "", rawD = "";       
+        let cloudM = "", cloudD = "";   
+
         albumData.Sets.forEach((set, i) => {
-            let mList = [], dList = [], rawMList = [], rawDList = [];
+            let mList = [], dList = [];
+            let rawMList = [], rawDList = [];
+            let cloudMList = [], cloudDList = [];
+
             set.Stickers.forEach(s => {
                 let id = s.StickerId.split('.').pop();
                 let isGold = [9,10,11].includes(s.Rarity);
 
                 if (s.OwnedCount === 0) {
-                    if (!isGold) { mList.push(id); rawMList.push(id); }
-                    else if (showGolds) { mList.push(`<span style="color:#d4af37;font-weight:bold;">[${id}]</span>`); rawMList.push(`[${id}]`); }
-                    else { rawMList.push(`[${id}]`); } 
+                    cloudMList.push(isGold ? `[${id}]` : id);
+                    if (!isGold) { 
+                        mList.push(id); 
+                        rawMList.push(id); 
+                    } else if (showGolds) { 
+                        mList.push(`<span style="color:#d4af37;font-weight:bold;">[${id}]</span>`); 
+                        rawMList.push(`[${id}]`); 
+                    }
                 }
                 else if (s.OwnedCount > 1) {
-                    if (!isGold) { dList.push(id); rawDList.push(id); }
-                    else if (showGolds) { dList.push(`<span style="color:#d4af37;font-weight:bold;">[${id}]</span>`); rawDList.push(`[${id}]`); }
-                    else { rawDList.push(`[${id}]`); }
+                    cloudDList.push(isGold ? `[${id}]` : id);
+                    if (!isGold) { 
+                        dList.push(id); 
+                        rawDList.push(id); 
+                    } else if (showGolds) { 
+                        dList.push(`<span style="color:#d4af37;font-weight:bold;">[${id}]</span>`); 
+                        rawDList.push(`[${id}]`); 
+                    }
                 }
             });
+
             const badge = `<span style="display:inline-block;width:25px;color:#4287f5;font-weight:bold;">${i+1}-</span>`;
             if (mList.length) mLines.push(`<div>${badge}${mList.join(',')}</div>`);
             if (dList.length) dLines.push(`<div>${badge}${dList.join(',')}</div>`);
             
             if (rawMList.length) rawM += `${i+1}-${rawMList.join(',')}\n`;
             if (rawDList.length) rawD += `${i+1}-${rawDList.join(',')}\n`;
+
+            if (cloudMList.length) cloudM += `${i+1}-${cloudMList.join(',')}\n`;
+            if (cloudDList.length) cloudD += `${i+1}-${cloudDList.join(',')}\n`;
         });
-        return { mHtml: mLines.join(''), dHtml: dLines.join(''), rawM, rawD };
+
+        return { mHtml: mLines.join(''), dHtml: dLines.join(''), rawM, rawD, cloudM, cloudD };
     }
 
     function createFloatingButton() {
@@ -284,10 +326,56 @@
         const favsObj = getLocalFavsObj();
         const friendsOptions = Object.keys(favsObj).map(id => {
             const displayName = favsObj[id] ? `${favsObj[id]} (${id})` : id;
-            return `<option value="${id}">${displayName}</option>`;
+            const isSelected = (id === lastCompareInputs.id) ? 'selected' : '';
+            return `<option value="${id}" ${isSelected}>${displayName}</option>`;
         }).join('');
 
-        const isProtected = myRemoteData?.has_password || !!localStorage.getItem('mgo_user_password');
+        const isProtected = myRemoteData?.has_password || !!localStorage.getItem('mgo_user_password_hash');
+        const hasCompareData = !!(lastCompareInputs.id || lastCompareInputs.missing || lastCompareInputs.doubles);
+
+        // Construction dynamique du panneau de sécurité
+        let secPanelHTML = "";
+        if (!isProtected) {
+            secPanelHTML = `
+                <h4 style="margin:0 0 10px 0; color:#856404;">🔒 Sécuriser cet ID (Actuellement non protégé)</h4>
+                <div style="display:flex; flex-direction:column; gap:10px; max-width:550px;">
+                    <div>
+                        <label style="font-size:0.8rem; font-weight:bold; color:#856404;">Définir un mot de passe :</label>
+                        <input type="password" id="sec-pass-input" placeholder="Saisir un mot de passe..." style="width:100%; padding:8px; border-radius:5px; border:1px solid #ccc; box-sizing:border-box;">
+                    </div>
+                    <div>
+                        <label style="font-size:0.8rem; font-weight:bold; color:#856404;">Question de sécurité (en cas d'oubli) :</label>
+                        <select id="sec-q-select" style="width:100%; padding:8px; border-radius:5px; border:1px solid #ccc; background:white; margin-bottom:5px;">
+                            ${SECURITY_QUESTIONS.map((q, idx) => `<option value="${idx+1}">${q}</option>`).join('')}
+                        </select>
+                        <input type="text" id="sec-a-input" placeholder="Réponse à la question..." style="width:100%; padding:8px; border-radius:5px; border:1px solid #ccc; box-sizing:border-box;">
+                    </div>
+                    <button id="btn-save-sec" style="background:#27ae60; color:white; border:none; padding:10px 15px; border-radius:5px; cursor:pointer; font-weight:bold; width:max-content;">Activer la protection</button>
+                </div>`;
+        } else {
+            secPanelHTML = `
+                <h4 style="margin:0 0 10px 0; color:#27ae60;">🔒 Cet ID est sécurisé</h4>
+                <div style="display:flex; gap:20px; flex-wrap:wrap;">
+                    <!-- Bloc Modification Mot de Passe -->
+                    <div style="flex:1; min-width:250px; background:#fff; padding:12px; border-radius:8px; border:1px solid #ddd;">
+                        <strong style="color:#2c3e50; font-size:0.85rem; display:block; margin-bottom:8px;">Changer le mot de passe</strong>
+                        <input type="password" id="sec-old-pass" placeholder="Mot de passe actuel..." style="width:100%; padding:6px; border-radius:4px; border:1px solid #ccc; margin-bottom:6px; box-sizing:border-box;">
+                        <input type="password" id="sec-new-pass" placeholder="Nouveau mot de passe..." style="width:100%; padding:6px; border-radius:4px; border:1px solid #ccc; margin-bottom:8px; box-sizing:border-box;">
+                        <button id="btn-change-pass" style="background:#2980b9; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:0.8rem;">Mettre à jour</button>
+                    </div>
+
+                    <!-- Bloc Réinitialisation via Question Secrète -->
+                    <div style="flex:1; min-width:280px; background:#fff; padding:12px; border-radius:8px; border:1px solid #ddd;">
+                        <strong style="color:#c0392b; font-size:0.85rem; display:block; margin-bottom:8px;">Mot de passe oublié ? (Question secrète)</strong>
+                        <select id="sec-q-select" style="width:100%; padding:6px; border-radius:4px; border:1px solid #ccc; background:white; margin-bottom:6px;">
+                            ${SECURITY_QUESTIONS.map((q, idx) => `<option value="${idx+1}">${q}</option>`).join('')}
+                        </select>
+                        <input type="text" id="sec-a-input" placeholder="Votre réponse à la question..." style="width:100%; padding:6px; border-radius:4px; border:1px solid #ccc; margin-bottom:6px; box-sizing:border-box;">
+                        <input type="password" id="sec-reset-new-pass" placeholder="Indiquer le NOUVEAU mot de passe..." style="width:100%; padding:6px; border-radius:4px; border:1px solid #ccc; margin-bottom:8px; box-sizing:border-box;">
+                        <button id="btn-reset-sec" style="background:#d35400; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:0.8rem;">Réinitialiser avec la question secrète</button>
+                    </div>
+                </div>`;
+        }
 
         overlay.innerHTML = `
             <div style="width:950px; max-width:95%; max-height:90vh; background:#f8f9fa; border-radius:15px; overflow:hidden; display:flex; flex-direction:column; font-family:sans-serif;">
@@ -313,23 +401,9 @@
                         <button id="btn-sync-cloud" style="background:#27ae60; color:white; border:none; padding:10px 15px; border-radius:5px; cursor:pointer; font-weight:bold;">☁️ Partager mon Album</button>
                     </div>
 
-                    <!-- PANNEAU SÉCURITÉ -->
+                    <!-- PANNEAU SÉCURITÉ DYNAMIQUE -->
                     <div id="sec-panel" style="display:none; background:#fff3cd; border:1px solid #ffeeba; padding:15px; border-radius:8px; margin-bottom:15px;">
-                        <h4 style="margin:0 0 10px 0; color:#856404;">🔒 Sécurisation de l'ID</h4>
-                        <div style="display:flex; flex-direction:column; gap:10px; max-width:500px;">
-                            <input type="password" id="sec-pass-input" placeholder="Mot de passe (enregistré automatiquement)..." style="padding:8px; border-radius:5px; border:1px solid #ccc;">
-                            
-                            <label style="font-size:0.8rem; font-weight:bold; color:#856404;">Question de sécurité en cas d'oubli :</label>
-                            <select id="sec-q-select" style="padding:8px; border-radius:5px; border:1px solid #ccc; background:white;">
-                                ${SECURITY_QUESTIONS.map((q, idx) => `<option value="${idx+1}">${q}</option>`).join('')}
-                            </select>
-                            <input type="text" id="sec-a-input" placeholder="Réponse à la question..." style="padding:8px; border-radius:5px; border:1px solid #ccc;">
-                            
-                            <div style="display:flex; gap:10px;">
-                                <button id="btn-save-sec" style="background:#27ae60; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold;">Enregistrer la protection</button>
-                                <button id="btn-reset-sec" style="background:#d35400; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer; display:${myRemoteData?.has_password?'inline-block':'none'};">Réinitialiser (Mot de passe oublié ?)</button>
-                            </div>
-                        </div>
+                        ${secPanelHTML}
                     </div>
 
                     <div style="margin-bottom:15px; display:flex; align-items:center; gap:10px; font-size:0.85rem;">
@@ -356,13 +430,13 @@
                                 <option value="">-- Favoris / Amis --</option>
                                 ${friendsOptions}
                             </select>
-                            <input type="text" id="friend-id-input" placeholder="ID de l'ami..." style="flex:1; min-width:150px; padding:10px; border-radius:8px; border:1px solid #ddd;">
-                            <input type="text" id="friend-alias-input" placeholder="Surnom (max 20car, remplace espace)..." style="width:220px; padding:10px; border-radius:8px; border:1px solid #ddd;">
+                            <input type="text" id="friend-id-input" value="${lastCompareInputs.id}" placeholder="ID de l'ami..." style="flex:1; min-width:150px; padding:10px; border-radius:8px; border:1px solid #ddd;">
+                            <input type="text" id="friend-alias-input" value="${lastCompareInputs.alias}" placeholder="Surnom (max 20car, remplace espace)..." style="width:220px; padding:10px; border-radius:8px; border:1px solid #ddd;">
                             <button id="btn-load-friend" style="padding:10px 20px; background:#4287f5; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Récupérer</button>
-                            <button id="btn-save-friend" style="display:none; padding:10px; background:#f39c12; color:white; border:none; border-radius:8px; cursor:pointer; width:44px;" title="Sauvegarder / Modifier l'ami">⭐</button>
-                            <button id="btn-del-friend" style="display:none; padding:10px; background:#e74c3c; color:white; border:none; border-radius:8px; cursor:pointer; width:44px;" title="Supprimer l'ami">🗑️</button>
+                            <button id="btn-save-friend" style="display:${lastCompareInputs.id?'block':'none'}; padding:10px; background:#f39c12; color:white; border:none; border-radius:8px; cursor:pointer; width:44px;" title="Sauvegarder / Modifier l'ami">⭐</button>
+                            <button id="btn-del-friend" style="display:${lastCompareInputs.id?'block':'none'}; padding:10px; background:#e74c3c; color:white; border:none; border-radius:8px; cursor:pointer; width:44px;" title="Supprimer l'ami">🗑️</button>
                         </div>
-                        <div id="friend-status" style="margin-top:8px; font-size:0.85rem; color:#666;"></div>
+                        <div id="friend-status" style="margin-top:8px; font-size:0.85rem; color:#666;">${lastCompareInputs.statusHtml}</div>
                     </div>
                     <div>
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
@@ -374,14 +448,17 @@
                         <div style="display:flex; flex-wrap:wrap; gap:15px; margin-bottom:15px;">
                             <div style="flex:1; min-width:280px;">
                                 <label style="display:block; font-size:0.75rem; font-weight:bold; color:#e44d26; margin-bottom:5px;">SES MANQUANTES</label>
-                                <textarea id="friend-missing" style="width:100%; height:100px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;"></textarea>
+                                <textarea id="friend-missing" style="width:100%; height:100px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;">${lastCompareInputs.missing}</textarea>
                             </div>
                             <div style="flex:1; min-width:280px;">
                                 <label style="display:block; font-size:0.75rem; font-weight:bold; color:#27ae60; margin-bottom:5px;">SES DOUBLES</label>
-                                <textarea id="friend-doubles" style="width:100%; height:100px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;"></textarea>
+                                <textarea id="friend-doubles" style="width:100%; height:100px; padding:8px; border-radius:8px; border:1px solid #ddd; font-family:monospace; font-size:0.75rem; resize:none; box-sizing:border-box;">${lastCompareInputs.doubles}</textarea>
                             </div>
                         </div>
-                        <button id="run-manual-compare" style="width:100%; padding:10px; background:#eee; border:1px solid #ccc; border-radius:8px; cursor:pointer; font-weight:bold; margin-bottom:10px;">Comparer manuellement</button>
+                        <div style="display:flex; gap:10px; margin-bottom:10px;">
+                            <button id="run-manual-compare" style="flex:1; padding:10px; background:#eee; border:1px solid #ccc; border-radius:8px; cursor:pointer; font-weight:bold;">Comparer manuellement</button>
+                            <button id="btn-reset-compare" style="display:${hasCompareData?'block':'none'}; padding:10px 15px; background:#95a5a6; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold;" title="Réinitialiser les informations">🧹 RàZ</button>
+                        </div>
                     </div>
                     <div id="compare-results" style="display:flex; flex-wrap:wrap; gap:20px; border-top:2px solid #f0f0f0; padding-top:20px;"></div>
                 </div>
@@ -400,11 +477,11 @@
                             <div>
                                 <label for="filter-days">Actifs depuis :</label>
                                 <select id="filter-days" style="padding:5px; border-radius:5px; border:1px solid #ccc; background:white;">
-                                    <option value="1" selected>Aujourd'hui</option>
-                                    <option value="3">3 jours</option>
-                                    <option value="7">7 jours</option>
-                                    <option value="15">15 jours</option>
-                                    <option value="999">Tout voir</option>
+                                    <option value="1" ${lastGlobalFilterDays==="1"?'selected':''}>Aujourd'hui</option>
+                                    <option value="3" ${lastGlobalFilterDays==="3"?'selected':''}>3 jours</option>
+                                    <option value="7" ${lastGlobalFilterDays==="7"?'selected':''}>7 jours</option>
+                                    <option value="15" ${lastGlobalFilterDays==="15"?'selected':''}>15 jours</option>
+                                    <option value="999" ${lastGlobalFilterDays==="999"?'selected':''}>Tout voir</option>
                                 </select>
                             </div>
                             <button id="btn-run-global" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; box-shadow:0 4px 10px rgba(39,174,96,0.3);">Lancer la Recherche</button>
@@ -426,15 +503,14 @@
         const btnLoad = document.getElementById('btn-load-friend');
         const btnSave = document.getElementById('btn-save-friend');
         const btnDel = document.getElementById('btn-del-friend');
+        const btnResetCompare = document.getElementById('btn-reset-compare');
+        const filterDaysSelect = document.getElementById('filter-days');
         const secPanel = document.getElementById('sec-panel');
+        const fMissingElem = document.getElementById('friend-missing');
+        const fDoublesElem = document.getElementById('friend-doubles');
 
-        fAlias.oninput = function() {
-            let val = fAlias.value.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9À-ÿ_\-.,@]/g, '');
-            if (val.length > 20) val = val.substring(0, 20);
-            fAlias.value = val;
-        };
-
-        const updateFavButtons = (id) => {
+        // --- FONCTIONS DE DESSIN ET CALCUL ---
+        function updateFavButtons(id) {
             const favs = getLocalFavsObj();
             const upperID = id.trim().toUpperCase();
             if (!upperID) { btnSave.style.display = 'none'; btnDel.style.display = 'none'; return; }
@@ -443,22 +519,14 @@
             btnSave.innerHTML = exists ? "💾" : "⭐";
             btnSave.title = exists ? "Modifier l'alias" : "Ajouter aux favoris";
             btnDel.style.display = exists ? 'block' : 'none';
-        };
+        }
 
-        const copyToClip = (text, btn, msg = "Copié !") => {
-            navigator.clipboard.writeText(text).then(() => {
-                const old = btn.innerHTML; btn.innerHTML = msg;
-                if(btn.id !== "btn-sync-cloud") btn.style.background = "#27ae60";
-                setTimeout(() => {
-                    btn.innerHTML = old;
-                    if(btn.id !== "btn-sync-cloud") btn.style.background = (btn.id === "copy-my-id" || btn.id === "btn-load-friend") ? "#4287f5" : "#666";
-                }, 2000);
-            });
-        };
-
-        const runCompareLogic = (fMissingRaw, fDoublesRaw) => {
+        function runCompareLogic(fMissingRaw, fDoublesRaw) {
+            if (!albumData || !albumData.Sets) return;
             const fMissing = parseFriendData(fMissingRaw), fDoubles = parseFriendData(fDoublesRaw);
             const resultsDiv = document.getElementById('compare-results');
+            if (!resultsDiv) return;
+
             let canGet = "", canGive = "";
             
             albumData.Sets.forEach((set, i) => {
@@ -479,11 +547,11 @@
             resultsDiv.innerHTML = `
                 <div style="flex:1; min-width:250px; background:#e8f5e9; padding:15px; border-radius:10px; border:1px solid #c8e6c9;"><h4 style="margin:0 0 10px 0; color:#2e7d32;">🎁 Recevables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGet || "Aucun"}</div></div>
                 <div style="flex:1; min-width:250px; background:#fff3e0; padding:15px; border-radius:10px; border:1px solid #ef6c00;"><h4 style="margin:0 0 10px 0; color:#ef6c00;">🤝 Donnables :</h4><div style="font-family:monospace; font-size:0.85rem;">${canGive || "Aucun"}</div></div>`;
-        };
+        }
 
-        const renderGlobalUI = () => {
+        function renderGlobalUI() {
             const resultsContainer = document.getElementById('global-results-container');
-            if (!lastGlobalResultsData || lastGlobalResultsData.length === 0) return;
+            if (!resultsContainer || !lastGlobalResultsData || lastGlobalResultsData.length === 0) return;
 
             let globalHtml = [];
             let totalCorrelations = 0;
@@ -534,59 +602,184 @@
                         ${globalHtml.join('')}
                     </div>`;
             }
+        }
+
+        function trackCompareInputs() {
+            lastCompareInputs.id = fInput.value.trim().toUpperCase();
+            lastCompareInputs.alias = fAlias.value.trim();
+            lastCompareInputs.missing = fMissingElem.value;
+            lastCompareInputs.doubles = fDoublesElem.value;
+            lastCompareInputs.statusHtml = document.getElementById('friend-status').innerHTML;
+            
+            const hasData = !!(lastCompareInputs.id || lastCompareInputs.missing || lastCompareInputs.doubles);
+            if (btnResetCompare) btnResetCompare.style.display = hasData ? 'block' : 'none';
+        }
+
+        function copyToClip(text, btn, msg = "Copié !") {
+            navigator.clipboard.writeText(text).then(() => {
+                const old = btn.innerHTML; btn.innerHTML = msg;
+                if(btn.id !== "btn-sync-cloud") btn.style.background = "#27ae60";
+                setTimeout(() => {
+                    btn.innerHTML = old;
+                    if(btn.id !== "btn-sync-cloud") btn.style.background = (btn.id === "copy-my-id" || btn.id === "btn-load-friend") ? "#4287f5" : "#666";
+                }, 2000);
+            });
+        }
+
+        // --- BINDING DES ÉVÉNEMENTS ---
+        fMissingElem.oninput = trackCompareInputs;
+        fDoublesElem.oninput = trackCompareInputs;
+
+        fAlias.oninput = function() {
+            let val = fAlias.value.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9À-ÿ_\-.,@]/g, '');
+            if (val.length > 20) val = val.substring(0, 20);
+            fAlias.value = val;
+            trackCompareInputs();
         };
 
+        filterDaysSelect.onchange = () => {
+            lastGlobalFilterDays = filterDaysSelect.value;
+        };
+
+        // Rendu immédiat de l'onglet actif si données présentes
+        if (activeTab === 'comp' && (lastCompareInputs.missing || lastCompareInputs.doubles)) {
+            runCompareLogic(lastCompareInputs.missing, lastCompareInputs.doubles);
+            updateFavButtons(lastCompareInputs.id);
+        }
+
+        if (activeTab === 'global' && lastGlobalResultsData) {
+            renderGlobalUI();
+        }
+
         // --- Événements Clicks ---
+        btnResetCompare.onclick = () => {
+            fSelect.value = "";
+            fInput.value = "";
+            fAlias.value = "";
+            fMissingElem.value = "";
+            fDoublesElem.value = "";
+            document.getElementById('friend-status').innerHTML = "";
+            document.getElementById('compare-results').innerHTML = "";
+            updateFavButtons("");
+            trackCompareInputs();
+        };
+
         document.getElementById('btn-sec-config').onclick = () => {
             secPanel.style.display = (secPanel.style.display === 'none') ? 'block' : 'none';
         };
 
-        document.getElementById('btn-save-sec').onclick = async () => {
-            const pass = document.getElementById('sec-pass-input').value.trim();
-            const q = document.getElementById('sec-q-select').value;
-            const a = document.getElementById('sec-a-input').value.trim();
+        // Enregistrer / Activer la protection (première fois)
+        const btnSaveSec = document.getElementById('btn-save-sec');
+        if (btnSaveSec) {
+            btnSaveSec.onclick = async () => {
+                const pass = document.getElementById('sec-pass-input').value.trim();
+                const q = document.getElementById('sec-q-select').value;
+                const a = document.getElementById('sec-a-input').value.trim();
 
-            if (!pass || !a) {
-                alert("Veuillez renseigner un mot de passe ET une réponse à la question de sécurité.");
-                return;
-            }
+                if (!pass || !a) {
+                    alert("Veuillez renseigner un mot de passe ET la réponse à la question secrète.");
+                    return;
+                }
 
-            try {
-                await syncToCloud(data, { password: pass, secQuestion: q, secAnswer: a });
-                localStorage.setItem('mgo_user_password', pass);
-                alert("🔒 Sécurité activée avec succès ! Le mot de passe a été mémorisé sur ce navigateur.");
-                showModal('view');
-            } catch(e) {
-                alert("❌ Erreur lors de l'enregistrement de la sécurité.");
-            }
-        };
+                try {
+                    const passHash = await hashPassword(pass);
+                    const ansHash = await hashPassword(a.toLowerCase());
+                    await syncToCloud(data, { password: pass, secQuestion: q, secAnswer: a });
+                    localStorage.setItem('mgo_user_password_hash', passHash);
+                    localStorage.setItem('mgo_user_sec_q', String(q));
+                    localStorage.setItem('mgo_user_sec_a_hash', ansHash);
+                    alert("🔒 Protection activée avec succès !");
+                    showModal('view');
+                } catch(e) {
+                    alert("❌ Erreur lors de l'enregistrement de la sécurité.");
+                }
+            };
+        }
 
-        document.getElementById('btn-reset-sec').onclick = async () => {
-            const q = document.getElementById('sec-q-select').value;
-            const a = document.getElementById('sec-a-input').value.trim();
-            const newPass = prompt("Indiquez votre NOUVEAU mot de passe :");
+        // Changer le mot de passe (avec contrôle préalable)
+        const btnChangePass = document.getElementById('btn-change-pass');
+        if (btnChangePass) {
+            btnChangePass.onclick = async () => {
+                const oldPass = document.getElementById('sec-old-pass').value.trim();
+                const newPass = document.getElementById('sec-new-pass').value.trim();
 
-            if (!a || !newPass || !newPass.trim()) {
-                alert("Veuillez remplir la réponse à la question et indiquer un nouveau mot de passe.");
-                return;
-            }
+                if (!oldPass || !newPass) {
+                    alert("Veuillez indiquer votre mot de passe actuel ET le nouveau mot de passe.");
+                    return;
+                }
 
-            try {
-                await syncToCloud(data, { password: newPass.trim(), secQuestion: q, secAnswer: a });
-                localStorage.setItem('mgo_user_password', newPass.trim());
-                alert("✅ Mot de passe réinitialisé et mémorisé avec succès !");
-                showModal('view');
-            } catch(e) {
-                alert("❌ Échec de la réinitialisation : Réponse de sécurité incorrecte ou erreur réseau.");
-            }
-        };
+                btnChangePass.disabled = true; btnChangePass.innerText = "Vérification...";
+                try {
+                    const remote = await fetchPlayerData(myId);
+                    const inputOldHash = await hashPassword(oldPass);
+
+                    if (remote.password_hash && remote.password_hash !== inputOldHash) {
+                        alert("❌ Échec : Le mot de passe actuel saisi est incorrect !");
+                        btnChangePass.disabled = false; btnChangePass.innerText = "Mettre à jour";
+                        return;
+                    }
+
+                    const newPassHash = await hashPassword(newPass);
+                    await syncToCloud(data, { password: newPass });
+                    localStorage.setItem('mgo_user_password_hash', newPassHash);
+                    alert("✅ Mot de passe mis à jour avec succès !");
+                    showModal('view');
+                } catch(e) {
+                    alert("❌ Erreur lors de la mise à jour du mot de passe.");
+                    btnChangePass.disabled = false; btnChangePass.innerText = "Mettre à jour";
+                }
+            };
+        }
+
+        // Réinitialiser le mot de passe via Question Secrète (avec contrôle préalable)
+        const btnResetSec = document.getElementById('btn-reset-sec');
+        if (btnResetSec) {
+            btnResetSec.onclick = async () => {
+                const q = document.getElementById('sec-q-select').value;
+                const a = document.getElementById('sec-a-input').value.trim();
+                const newPass = document.getElementById('sec-reset-new-pass').value.trim();
+
+                if (!a || !newPass) {
+                    alert("Veuillez remplir la réponse à la question ET indiquer le nouveau mot de passe.");
+                    return;
+                }
+
+                btnResetSec.disabled = true; btnResetSec.innerText = "Vérification...";
+                try {
+                    const remote = await fetchPlayerData(myId);
+                    const inputAnsHash = await hashPassword(a.toLowerCase());
+
+                    const isValidQuestion = (remote.sec_question === String(q));
+                    const isValidAnswer = (remote.sec_answer === inputAnsHash);
+
+                    if (!isValidQuestion || !isValidAnswer) {
+                        alert("❌ Échec : La question de sécurité choisie ou la réponse saisie est incorrecte !");
+                        btnResetSec.disabled = false; btnResetSec.innerText = "Réinitialiser avec la question secrète";
+                        return;
+                    }
+
+                    const newPassHash = await hashPassword(newPass);
+                    await syncToCloud(data, { password: newPass, secQuestion: q, secAnswer: a });
+                    localStorage.setItem('mgo_user_password_hash', newPassHash);
+                    localStorage.setItem('mgo_user_sec_q', String(q));
+                    localStorage.setItem('mgo_user_sec_a_hash', inputAnsHash);
+                    alert("✅ Mot de passe réinitialisé avec succès !");
+                    showModal('view');
+                } catch(e) {
+                    alert("❌ Échec de la réinitialisation : Réponse à la question secrète incorrecte.");
+                    btnResetSec.disabled = false; btnResetSec.innerText = "Réinitialiser avec la question secrète";
+                }
+            };
+        }
 
         document.getElementById('copy-my-id').onclick = (e) => copyToClip(myId, e.target);
         document.getElementById('import-my-id').onclick = () => {
             const newId = prompt("Collez l'ID à importer :", myId);
             if (newId && newId.trim() !== "") {
                 localStorage.setItem('mgo_user_id', newId.trim().toUpperCase());
-                localStorage.removeItem('mgo_user_password'); // Réinitialise le mot de passe local si on change d'ID
+                localStorage.removeItem('mgo_user_password_hash');
+                localStorage.removeItem('mgo_user_sec_q');
+                localStorage.removeItem('mgo_user_sec_a_hash');
                 showModal('view');
             }
         };
@@ -606,9 +799,16 @@
 
         fSelect.onchange = () => { 
             const id = fSelect.value; fInput.value = id; 
-            fAlias.value = favsObj[id] || ""; updateFavButtons(id); 
+            fAlias.value = favsObj[id] || ""; 
+            updateFavButtons(id); 
+            trackCompareInputs();
         };
-        fInput.oninput = () => { fAlias.value = favsObj[fInput.value.trim().toUpperCase()] || ""; updateFavButtons(fInput.value); };
+        
+        fInput.oninput = () => { 
+            fAlias.value = favsObj[fInput.value.trim().toUpperCase()] || ""; 
+            updateFavButtons(fInput.value); 
+            trackCompareInputs();
+        };
 
         btnLoad.onclick = async () => {
             const id = fInput.value.trim(); if (!id) return;
@@ -616,9 +816,19 @@
             try {
                 const friendData = await fetchPlayerData(id);
                 lastLoadedFriendData = friendData; 
-                document.getElementById('friend-missing').value = friendData.missing_text;
-                document.getElementById('friend-doubles').value = friendData.doubles_text;
-                document.getElementById('friend-status').innerHTML = `📅 Mis à jour : <b>${formatDate(friendData.updated_at)}</b>`;
+                fMissingElem.value = friendData.missing_text;
+                fDoublesElem.value = friendData.doubles_text;
+                
+                const currentAlbum = albumData?.AlbumName || albumData?.AlbumId || "";
+                let statusStr = `📅 Mis à jour : <b>${formatDate(friendData.updated_at)}</b>`;
+                
+                if (friendData.album_name && currentAlbum && friendData.album_name !== currentAlbum) {
+                    statusStr += ` <span style="color:#e74c3c; font-weight:bold; margin-left:10px;">⚠️ Ancien album (${friendData.album_name})</span>`;
+                }
+
+                document.getElementById('friend-status').innerHTML = statusStr;
+                
+                trackCompareInputs();
                 runCompareLogic(friendData.missing_text, friendData.doubles_text);
                 btnLoad.innerHTML = "Récupérer"; updateFavButtons(id);
             } catch (err) { alert(err); btnLoad.innerHTML = "Récupérer"; }
@@ -644,7 +854,7 @@
         document.getElementById('btn-run-global').onclick = async () => {
             const currentFavs = getLocalFavsObj();
             const friendIds = Object.keys(currentFavs);
-            const maxDays = parseInt(document.getElementById('filter-days').value);
+            const maxDays = parseInt(filterDaysSelect.value);
             const resultsContainer = document.getElementById('global-results-container');
             const loadingDiv = document.getElementById('global-loading');
             const progressSpan = document.getElementById('global-progress');
@@ -657,6 +867,8 @@
             resultsContainer.innerHTML = ""; loadingDiv.style.display = "block";
             lastGlobalResultsData = [];
             let processedCount = 0; progressSpan.textContent = `0/${friendIds.length}`;
+            
+            const myAlbumName = albumData?.AlbumName || albumData?.AlbumId || "";
 
             const promises = friendIds.map(async (id) => {
                 try {
@@ -664,7 +876,9 @@
                     processedCount++; progressSpan.textContent = `${processedCount}/${friendIds.length}`;
                     
                     const days = daysBetween(fData.updated_at, new Date().toISOString());
-                    if (days <= maxDays) {
+                    const isSameAlbum = !fData.album_name || !myAlbumName || (fData.album_name === myAlbumName);
+
+                    if (days <= maxDays && isSameAlbum) {
                         lastGlobalResultsData.push({
                             id: id,
                             alias: currentFavs[id] || id, 
@@ -692,8 +906,8 @@
                     document.getElementById('my-missing-container').innerHTML = freshData.mHtml || "Aucune";
                     document.getElementById('my-doubles-container').innerHTML = freshData.dHtml || "Aucune";
                 } 
-                else if (currentActiveTab === 'comp' && lastLoadedFriendData) {
-                    runCompareLogic(lastLoadedFriendData.missing_text, lastLoadedFriendData.doubles_text);
+                else if (currentActiveTab === 'comp' && (fMissingElem.value || fDoublesElem.value)) {
+                    runCompareLogic(fMissingElem.value, fDoublesElem.value);
                 } 
                 else if (currentActiveTab === 'global' && lastGlobalResultsData) {
                     renderGlobalUI();
@@ -705,8 +919,17 @@
         document.getElementById('tab-compare').onclick = () => showModal('comp');
         document.getElementById('tab-search-global').onclick = () => showModal('global');
         document.getElementById('close-modal').onclick = () => overlay.remove();
-        document.getElementById('run-manual-compare').onclick = () => runCompareLogic(document.getElementById('friend-missing').value, document.getElementById('friend-doubles').value);
-        document.getElementById('copy-m').onclick = (e) => copyToClip("❌ MANQUANTES :\n" + data.rawM, e.target);
-        document.getElementById('copy-d').onclick = (e) => copyToClip("✅ DOUBLES :\n" + data.rawD, e.target);
+        document.getElementById('run-manual-compare').onclick = () => {
+            trackCompareInputs();
+            runCompareLogic(fMissingElem.value, fDoublesElem.value);
+        };
+        document.getElementById('copy-m').onclick = (e) => {
+            const freshData = generateContent();
+            copyToClip("❌ MANQUANTES :\n" + freshData.rawM, e.target);
+        };
+        document.getElementById('copy-d').onclick = (e) => {
+            const freshData = generateContent();
+            copyToClip("✅ DOUBLES :\n" + freshData.rawD, e.target);
+        };
     }
 })();
