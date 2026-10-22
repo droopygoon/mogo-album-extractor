@@ -13,7 +13,7 @@
 (function() {
     'use strict';
 
-    const CURRENT_VERSION = "1.80";
+    const CURRENT_VERSION = "1.97";
     
     // --- CONFIGURATION FIREBASE ---
     const FIREBASE_PROJECT_ID = "mogo-album-extractor"; 
